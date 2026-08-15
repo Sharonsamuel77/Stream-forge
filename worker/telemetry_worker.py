@@ -1,7 +1,7 @@
-from confluent_kafka import Consumer
 import json
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
+import time
+
+from confluent_kafka import Consumer, KafkaException, KafkaError
 
 from monitoring.metrics_server import (
     start_metrics_server,
@@ -13,109 +13,365 @@ from monitoring.metrics_server import (
     worker_up,
 )
 
+from state.rocksdb_store import RocksDBStateStore
+from state.temperature_processor import TemperatureProcessor
+
+
+# ============================================
+# Configuration
+# ============================================
+
 KAFKA_BROKER = "localhost:9092"
 TOPIC = "truck_telemetry"
+GROUP_ID = "streamforge-workers"
 
-consumer = Consumer({
-    "bootstrap.servers": KAFKA_BROKER,
-    "group.id": "streamforge-workers",
-    "auto.offset.reset": "earliest",
-})
+DB_PATH = "data/rocksdb"
 
-consumer.subscribe([TOPIC])
 
-# Store recent readings for each truck
-truck_readings = defaultdict(deque)
+# ============================================
+# Start Prometheus Metrics Server
+# ============================================
 
-# Start Prometheus metrics server
 start_metrics_server()
 
-print("StreamForge Worker started...")
-print(f"Listening to topic: {TOPIC}")
+
+# ============================================
+# Kafka Consumer Configuration
+# ============================================
+
+consumer_config = {
+    "bootstrap.servers": KAFKA_BROKER,
+    "group.id": GROUP_ID,
+    "auto.offset.reset": "earliest",
+    "enable.auto.commit": False,
+}
+
+consumer = Consumer(consumer_config)
+
+
+# ============================================
+# RocksDB State Store
+# ============================================
+
+state_store = RocksDBStateStore(DB_PATH)
+
+processor = TemperatureProcessor(state_store)
+
+
+# ============================================
+# Active Truck Tracking
+# ============================================
+
+active_truck_ids = set()
+
+
+# ============================================
+# Kafka Partition Assignment
+# ============================================
+
+def on_assign(consumer, partitions):
+
+    print()
+    print("===================================")
+    print("Partitions Assigned")
+    print("===================================")
+
+    for partition in partitions:
+
+        print(
+            f"Topic: {partition.topic} | "
+            f"Partition: {partition.partition} | "
+            f"Offset: {partition.offset}"
+        )
+
+    consumer.assign(partitions)
+
+
+# ============================================
+# Kafka Partition Revocation
+# ============================================
+
+def on_revoke(consumer, partitions):
+
+    print()
+    print("===================================")
+    print("Partitions Revoked")
+    print("===================================")
+
+    for partition in partitions:
+
+        print(
+            f"Topic: {partition.topic} | "
+            f"Partition: {partition.partition}"
+        )
+
+
+# ============================================
+# Subscribe to Kafka Topic
+# ============================================
+
+consumer.subscribe(
+    [TOPIC],
+    on_assign=on_assign,
+    on_revoke=on_revoke,
+)
+
+
+# ============================================
+# Worker Startup
+# ============================================
+
+print("===================================")
+print("   StreamForge Telemetry Worker")
+print("===================================")
+
+print(f"Broker      : {KAFKA_BROKER}")
+print(f"Topic       : {TOPIC}")
+print(f"Consumer ID : {GROUP_ID}")
+print(f"State DB    : {DB_PATH}")
+
+print("Waiting for telemetry...")
+print("Press Ctrl+C to stop")
+print()
+
+
+# ============================================
+# Main Worker Loop
+# ============================================
 
 try:
+
     worker_up.set(1)
 
     while True:
+
+        # ------------------------------------
+        # Poll Kafka
+        # ------------------------------------
+
         message = consumer.poll(1.0)
 
         if message is None:
             continue
 
+
+        # ------------------------------------
+        # Kafka Error Handling
+        # ------------------------------------
+
         if message.error():
-            print(f"Kafka error: {message.error()}")
+
+            if message.error().code() == KafkaError._PARTITION_EOF:
+
+                continue
+
+            print(
+                f"Kafka error: {message.error()}"
+            )
+
             processing_errors_total.inc()
+
             continue
 
-        # Count every successfully received Kafka message
+
+        # ------------------------------------
+        # Message Received
+        # ------------------------------------
+
         messages_consumed_total.inc()
 
+        start_time = time.perf_counter()
+
+
         try:
-            # Measure message processing latency
-            with processing_latency_seconds.time():
 
-                data = json.loads(message.value().decode("utf-8"))
+            # =================================
+            # Decode Kafka Message
+            # =================================
 
-                truck_id = data["truck_id"]
-                temperature = float(data["temperature"])
-                timestamp = datetime.fromisoformat(data["timestamp"])
+            data = json.loads(
+                message.value().decode("utf-8")
+            )
 
-                # Basic filtering
-                if temperature < -50 or temperature > 100:
-                    print(
-                        f"Invalid temperature ignored: "
-                        f"Truck {truck_id} → {temperature}°C"
-                    )
-                    processing_errors_total.inc()
-                    continue
 
-                # Add the new reading
-                truck_readings[truck_id].append(
-                    (timestamp, temperature)
+            # =================================
+            # Extract Event Data
+            # =================================
+
+            truck_id = data["truck_id"]
+
+            temperature = float(
+                data["temperature"]
+            )
+
+            timestamp = data["timestamp"]
+
+
+            # =================================
+            # Validate Temperature
+            # =================================
+
+            if temperature < -50 or temperature > 100:
+
+                print(
+                    f"Invalid temperature ignored: "
+                    f"Truck {truck_id} -> "
+                    f"{temperature}°C"
                 )
 
-                # Keep only the last 5 minutes
-                cutoff_time = timestamp - timedelta(minutes=5)
+                processing_errors_total.inc()
 
-                while (
-                    truck_readings[truck_id]
-                    and truck_readings[truck_id][0][0] < cutoff_time
-                ):
-                    truck_readings[truck_id].popleft()
+                # Commit invalid message so it
+                # isn't processed repeatedly.
+                consumer.commit(
+                    message=message
+                )
 
-                # Calculate average
-                readings = truck_readings[truck_id]
+                continue
 
-                if readings:
-                    average = sum(
-                        temp for _, temp in readings
-                    ) / len(readings)
 
-                    print(
-                        f"Truck: {truck_id} | "
-                        f"5-min Average: {average:.2f}°C | "
-                        f"Readings: {len(readings)}"
-                    )
+            # =================================
+            # Track Active Trucks
+            # =================================
 
-                # Update active truck count
-                active_trucks.set(len(truck_readings))
+            active_truck_ids.add(
+                truck_id
+            )
 
-                # Count successfully processed message
-                messages_processed_total.inc()
+            active_trucks.set(
+                len(active_truck_ids)
+            )
 
-        except (json.JSONDecodeError, KeyError, ValueError) as error:
+
+            # =================================
+            # Process Temperature
+            # =================================
+
+            result = processor.process(
+                truck_id,
+                temperature,
+                timestamp,
+            )
+
+
+            # =================================
+            # Print Processing Information
+            # =================================
+
+            print(
+                f"Processed | "
+                f"truck={truck_id} | "
+                f"temperature={temperature:.2f}°C | "
+                f"partition={message.partition()} | "
+                f"offset={message.offset()}"
+            )
+
+
+            # =================================
+            # Check Completed 5-Minute Window
+            # =================================
+
+            if result is not None:
+
+                print(
+                    f"5-min Average | "
+                    f"truck={result['truck_id']} | "
+                    f"window="
+                    f"{result['window_start']} -> "
+                    f"{result['window_end']} | "
+                    f"average="
+                    f"{result['average_temperature']:.2f}°C"
+                )
+
+
+            # =================================
+            # Successfully Processed
+            # =================================
+
+            messages_processed_total.inc()
+
+
+            # =================================
+            # Processing Latency
+            # =================================
+
+            latency = (
+                time.perf_counter()
+                - start_time
+            )
+
+            processing_latency_seconds.observe(
+                latency
+            )
+
+
+            # =================================
+            # Manual Kafka Commit
+            # =================================
+
+            consumer.commit(
+                message=message
+            )
+
+
+        # =====================================
+        # Invalid Message
+        # =====================================
+
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+        ) as error:
+
             processing_errors_total.inc()
-            print(f"Invalid message ignored: {error}")
+
+            print(
+                f"Invalid message ignored: "
+                f"{error}"
+            )
+
+
+        # =====================================
+        # Unexpected Processing Error
+        # =====================================
 
         except Exception as error:
+
             processing_errors_total.inc()
-            print(f"Processing error: {error}")
+
+            print(
+                f"Processing error: "
+                f"{error}"
+            )
+
+
+# ============================================
+# Graceful Shutdown
+# ============================================
 
 except KeyboardInterrupt:
-    print("\nWorker stopped.")
+
+    print(
+        "\nStopping StreamForge worker..."
+    )
+
+
+except KafkaException as error:
+
+    print(
+        f"\nKafka exception: {error}"
+    )
+
 
 finally:
+
     worker_up.set(0)
-    active_trucks.set(0)
+
+    state_store.close()
+
     consumer.close()
-    print("Kafka consumer closed.")
+
+    print(
+        "Worker stopped."
+    )
