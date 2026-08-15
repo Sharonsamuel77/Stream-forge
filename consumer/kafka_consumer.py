@@ -19,7 +19,7 @@ consumer_config = {
     "bootstrap.servers": KAFKA_BROKER,
     "group.id": GROUP_ID,
     "auto.offset.reset": "earliest",
-    "enable.auto.commit": True,
+    "enable.auto.commit": False,
 }
 
 
@@ -120,7 +120,7 @@ try:
                 f"partition={message.partition()} | "
                 f"offset={message.offset()}"
             )
-
+            consumer.commit(message=message)
         except (json.JSONDecodeError, KeyError) as error:
 
             print(f"Invalid event received: {error}")
