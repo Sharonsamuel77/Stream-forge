@@ -123,7 +123,7 @@ try:
 
         except (json.JSONDecodeError, KeyError) as error:
 
-            print("Invalid event received: {error}")
+            print(f"Invalid event received: {error}")
 
 
 except KeyboardInterrupt:
