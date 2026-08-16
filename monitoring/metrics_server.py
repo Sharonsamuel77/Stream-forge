@@ -41,7 +41,7 @@ worker_up = Gauge(
 
 def start_metrics_server():
     """Start the Prometheus metrics HTTP server."""
-    start_http_server(8000)
+    start_http_server(9000)
 
     worker_up.set(1)
 
