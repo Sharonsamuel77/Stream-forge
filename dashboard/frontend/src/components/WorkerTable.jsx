@@ -10,6 +10,13 @@ function WorkerTable() {
       .catch((err) => console.error(err));
   }, []);
 
+  API.get("/workers")
+  .then((res) => {
+    console.log("Workers:", res.data);
+    setWorkers(res.data);
+  })
+  .catch((err) => console.error(err));
+
   return (
     <div className="workers-section">
       <h2>Workers</h2>

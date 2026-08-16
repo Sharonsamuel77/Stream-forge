@@ -15,9 +15,7 @@ function MetricCards() {
       <h2>Metrics</h2>
 
       <p>Throughput: {metrics.throughput}</p>
-
       <p>Workers: {metrics.active_workers}</p>
-
       <p>Failures: {metrics.failed_events}</p>
     </div>
   );

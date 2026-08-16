@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+from random import randint
 
 app = FastAPI()
 
+metrics_history = []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -15,32 +19,30 @@ app.add_middleware(
 def home():
     return {"message": "StreamForge Dashboard API"}
 
-
 @app.get("/metrics")
 def metrics():
-    return {
-        "throughput": 12450,
+    current_metrics = {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "throughput": randint(10000, 15000),
         "active_workers": 3,
-        "failed_events": 1
+        "failed_events": randint(0, 5),
     }
 
+    metrics_history.append(current_metrics)
+
+    if len(metrics_history) > 20:
+        metrics_history.pop(0)
+
+    return current_metrics
+
+@app.get("/metrics/history")
+def metrics_history_endpoint():
+    return metrics_history
 
 @app.get("/workers")
 def workers():
     return [
-        {
-            "id": "worker1",
-            "status": "active",
-            "partition": "partition0"
-        },
-        {
-            "id": "worker2",
-            "status": "active",
-            "partition": "partition1"
-        },
-        {
-            "id": "worker3",
-            "status": "active",
-            "partition": "partition2"
-        }
+        {"id": "worker1", "status": "active", "partition": "partition0"},
+        {"id": "worker2", "status": "active", "partition": "partition1"},
+        {"id": "worker3", "status": "active", "partition": "partition2"},
     ]
