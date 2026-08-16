@@ -255,3 +255,28 @@ body {
   color: white;
   margin-bottom: 20px;
 }
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.metric-card {
+  background: #132238;
+  border: 1px solid #2d4c74;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.metric-card h3 {
+  margin-bottom: 10px;
+}
+
+.metric-card p {
+  font-size: 28px;
+  font-weight: bold;
+  color: #00d4ff;
+}

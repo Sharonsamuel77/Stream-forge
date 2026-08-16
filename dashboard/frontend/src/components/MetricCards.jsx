@@ -2,21 +2,52 @@ import { useEffect, useState } from "react";
 import { API } from "../api";
 
 function MetricCards() {
-  const [metrics, setMetrics] = useState({});
+
+  const [summary, setSummary] = useState({});
 
   useEffect(() => {
-    API.get("/metrics")
-      .then((res) => setMetrics(res.data))
-      .catch(console.error);
+
+    const loadData = async () => {
+      const response = await API.get("/summary");
+      setSummary(response.data);
+    };
+
+    loadData();
+
+    const timer = setInterval(loadData, 3000);
+
+    return () => clearInterval(timer);
+
   }, []);
 
   return (
-    <div>
-      <h2>Metrics</h2>
+    <div className="metrics-grid">
 
-      <p>Throughput: {metrics.throughput}</p>
-      <p>Workers: {metrics.active_workers}</p>
-      <p>Failures: {metrics.failed_events}</p>
+      <div className="metric-card">
+        <h3>Total Trucks</h3>
+        <h2>{summary.total_trucks || 0}</h2>
+      </div>
+
+      <div className="metric-card">
+        <h3>Active Workers</h3>
+        <h2>{summary.active_workers || 0}</h2>
+      </div>
+
+      <div className="metric-card">
+        <h3>Total Readings</h3>
+        <h2>{summary.total_readings || 0}</h2>
+      </div>
+
+      <div className="metric-card">
+        <h3>Avg Temperature</h3>
+        <h2>{summary.avg_temperature || 0}°C</h2>
+      </div>
+
+      <div className="metric-card">
+        <h3>Active Alerts</h3>
+        <h2>{summary.active_alerts || 0}</h2>
+      </div>
+
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import json
 import time
+import os
+from datetime import datetime
 
 from confluent_kafka import (
     Consumer,
@@ -51,6 +53,28 @@ consumer_config = {
     "auto.offset.reset": "earliest",
     "enable.auto.commit": False,
 }
+def update_worker_status():
+
+    status = {
+        "worker1": {
+            "status": "active",
+            "partition": 0,
+            "last_seen": datetime.now().isoformat()
+        },
+        "worker2": {
+            "status": "active",
+            "partition": 1,
+            "last_seen": datetime.now().isoformat()
+        },
+        "worker3": {
+            "status": "active",
+            "partition": 2,
+            "last_seen": datetime.now().isoformat()
+        }
+    }
+
+    with open("data/rocksdb/worker_status.json", "w") as f:
+        json.dump(status, f, indent=4)
 
 consumer = Consumer(consumer_config)
 
@@ -153,17 +177,42 @@ try:
 
     worker_up.set(1)
 
+    def update_state_snapshot():
+
+        snapshot = {}
+
+        for key, value in state_store.db.items():
+
+            avg_temp = 0
+
+            if value["reading_count"] > 0:
+                avg_temp = round(
+                    value["temperature_sum"]
+                    / value["reading_count"],
+                    2
+            )
+
+            snapshot[str(key).replace("truck:", "")] = {
+                "avg_temperature": avg_temp,
+                "readings": value["reading_count"]
+            }
+
+        with open(
+            "data/state_snapshot.json",
+            "w"
+        ) as f:
+            json.dump(snapshot, f, indent=4)
+
     while True:
 
         # ----------------------------------------------------
         # Poll Kafka
         # ----------------------------------------------------
-
+        update_worker_status()
         message = consumer.poll(1.0)
 
         if message is None:
             continue
-
 
         # ----------------------------------------------------
         # Kafka Error Handling
@@ -179,7 +228,6 @@ try:
             )
 
             processing_errors_total.inc()
-
             continue
 
 
@@ -229,7 +277,6 @@ try:
                 )
 
                 processing_errors_total.inc()
-
                 # Invalid data should not remain
                 # permanently in the Kafka group.
 
@@ -270,7 +317,7 @@ try:
                 temperature,
                 timestamp
             )
-
+            update_state_snapshot()
 
             # ------------------------------------------------
             # Processing Information
@@ -352,7 +399,6 @@ try:
         ) as error:
 
             processing_errors_total.inc()
-
             print(
                 f"Invalid message ignored: "
                 f"{error}"
@@ -369,7 +415,6 @@ try:
         except Exception as error:
 
             processing_errors_total.inc()
-
             print(
                 f"Processing error: "
                 f"{error}"

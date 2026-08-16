@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { API } from "../api";
-
 import {
   LineChart,
   Line,
@@ -8,38 +7,57 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
+  ResponsiveContainer
 } from "recharts";
 
-function ThroughputChart() {
+export default function ThroughputChart() {
+
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+
+    const loadMetrics = async () => {
       try {
-        const res = await API.get("/metrics/history");
-        setData(res.data);
+
+        const res = await API.get("/metrics");
+
+        const point = {
+          time: new Date().toLocaleTimeString(),
+          throughput: res.data.throughput
+        };
+
+        setData((prev) => {
+          const updated = [...prev, point];
+
+          // Keep only last 10 points
+          return updated.slice(-10);
+        });
+
       } catch (err) {
         console.error(err);
       }
     };
 
-    fetchMetrics();
+    loadMetrics();
 
-    const interval = setInterval(fetchMetrics, 3000);
+    const timer = setInterval(loadMetrics, 3000);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
+
   }, []);
 
   return (
-    <div className="chart-container">
+    <div>
       <h2>Kafka Throughput</h2>
 
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
+
           <XAxis dataKey="time" />
+
           <YAxis />
+
           <Tooltip />
 
           <Line
@@ -47,11 +65,10 @@ function ThroughputChart() {
             dataKey="throughput"
             stroke="#00d4ff"
             strokeWidth={3}
+            dot={false}
           />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
-
-export default ThroughputChart;

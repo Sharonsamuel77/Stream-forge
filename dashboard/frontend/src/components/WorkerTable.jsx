@@ -5,17 +5,21 @@ function WorkerTable() {
   const [workers, setWorkers] = useState([]);
 
   useEffect(() => {
-    API.get("/workers")
-      .then((res) => setWorkers(res.data))
-      .catch((err) => console.error(err));
-  }, []);
+    const fetchWorkers = () => {
+      API.get("/workers")
+        .then((res) => {
+          console.log("Workers:", res.data);
+          setWorkers(res.data);
+        })
+        .catch((err) => console.error(err));
+    };
 
-  API.get("/workers")
-  .then((res) => {
-    console.log("Workers:", res.data);
-    setWorkers(res.data);
-  })
-  .catch((err) => console.error(err));
+    fetchWorkers();
+
+    const interval = setInterval(fetchWorkers, 3000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="workers-section">
@@ -34,7 +38,19 @@ function WorkerTable() {
           {workers.map((worker) => (
             <tr key={worker.id}>
               <td>{worker.id}</td>
-              <td>{worker.status}</td>
+
+              <td
+                style={{
+                  color:
+                    worker.status === "active"
+                      ? "lime"
+                      : "red",
+                  fontWeight:"bold"
+                }}
+              >
+                {worker.status}
+              </td>
+
               <td>{worker.partition}</td>
             </tr>
           ))}
