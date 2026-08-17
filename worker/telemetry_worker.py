@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 from confluent_kafka import (
@@ -22,23 +23,29 @@ from state.temperature_processor import TemperatureProcessor
 
 
 # ============================================================
-# Kafka Configuration
+# Configuration
 # ============================================================
 
 KAFKA_BROKER = "localhost:9092"
 TOPIC = "truck_telemetry"
 
-# Keep the state-worker consumer group
+# IMPORTANT:
+# All workers MUST use the same group ID.
 GROUP_ID = "streamforge-state-workers"
 
-DB_PATH = "data/rocksdb"
+DB_BASE_PATH = "data/rocksdb"
+
+# Each worker can use a different Prometheus port.
+METRICS_PORT = int(
+    os.environ.get("STREAMFORGE_METRICS_PORT", "8000")
+)
 
 
 # ============================================================
-# Start Prometheus Metrics Server
+# Prometheus
 # ============================================================
 
-start_metrics_server()
+start_metrics_server(METRICS_PORT)
 
 
 # ============================================================
@@ -48,7 +55,11 @@ start_metrics_server()
 consumer_config = {
     "bootstrap.servers": KAFKA_BROKER,
     "group.id": GROUP_ID,
+
+    # Read old messages if there is no committed offset.
     "auto.offset.reset": "earliest",
+
+    # We commit offsets manually after successful processing.
     "enable.auto.commit": False,
 }
 
@@ -56,23 +67,27 @@ consumer = Consumer(consumer_config)
 
 
 # ============================================================
-# RocksDB State Store
+# Partition State
 # ============================================================
 
-state_store = RocksDBStateStore(DB_PATH)
+# Each Kafka partition gets its own RocksDB instance.
+#
+# Example:
+#
+# data/rocksdb/
+#     partition_0/
+#     partition_1/
+#     partition_2/
+#
+# A worker only opens the databases for the partitions
+# currently assigned to it.
 
-processor = TemperatureProcessor(state_store)
+partition_stores = {}
+partition_processors = {}
 
 
 # ============================================================
-# Active Truck Tracking
-# ============================================================
-
-active_truck_ids = set()
-
-
-# ============================================================
-# Kafka Partition Assignment
+# Partition Assignment
 # ============================================================
 
 def on_assign(consumer, partitions):
@@ -84,17 +99,27 @@ def on_assign(consumer, partitions):
 
     for partition in partitions:
 
+        partition_id = partition.partition
+
         print(
             f"Topic: {partition.topic} | "
-            f"Partition: {partition.partition} | "
+            f"Partition: {partition_id} | "
             f"Offset: {partition.offset}"
         )
+
+        # Open RocksDB for this partition.
+        store = RocksDBStateStore(partition_id)
+
+        processor = TemperatureProcessor(store)
+
+        partition_stores[partition_id] = store
+        partition_processors[partition_id] = processor
 
     consumer.assign(partitions)
 
 
 # ============================================================
-# Kafka Partition Revocation
+# Partition Revocation
 # ============================================================
 
 def on_revoke(consumer, partitions):
@@ -106,14 +131,30 @@ def on_revoke(consumer, partitions):
 
     for partition in partitions:
 
+        partition_id = partition.partition
+
         print(
             f"Topic: {partition.topic} | "
-            f"Partition: {partition.partition}"
+            f"Partition: {partition_id}"
+        )
+
+        # Close the state belonging to this partition.
+        store = partition_stores.pop(
+            partition_id,
+            None
+        )
+
+        if store is not None:
+            store.close()
+
+        partition_processors.pop(
+            partition_id,
+            None
         )
 
 
 # ============================================================
-# Subscribe to Kafka Topic
+# Subscribe
 # ============================================================
 
 consumer.subscribe(
@@ -131,13 +172,14 @@ print("===================================")
 print("   StreamForge Telemetry Worker")
 print("===================================")
 
-print(f"Broker      : {KAFKA_BROKER}")
-print(f"Topic       : {TOPIC}")
-print(f"Consumer ID : {GROUP_ID}")
-print(f"State DB    : {DB_PATH}")
-print("Processor    : 5-minute temperature average")
-print("Monitoring   : Prometheus")
-print("Offsets      : Manual")
+print(f"Broker       : {KAFKA_BROKER}")
+print(f"Topic        : {TOPIC}")
+print(f"Consumer ID  : {GROUP_ID}")
+print(f"State DB     : {DB_BASE_PATH}")
+print("Processor     : 5-minute temperature average")
+print("Monitoring    : Prometheus")
+print(f"Metrics Port : {METRICS_PORT}")
+print("Offsets       : Manual")
 
 print()
 print("Waiting for telemetry...")
@@ -155,18 +197,18 @@ try:
 
     while True:
 
-        # ----------------------------------------------------
-        # Poll Kafka
-        # ----------------------------------------------------
-
         message = consumer.poll(1.0)
+
+        # ----------------------------------------------------
+        # No message
+        # ----------------------------------------------------
 
         if message is None:
             continue
 
 
         # ----------------------------------------------------
-        # Kafka Error Handling
+        # Kafka error
         # ----------------------------------------------------
 
         if message.error():
@@ -184,18 +226,40 @@ try:
 
 
         # ----------------------------------------------------
-        # Message Received
+        # Message received
         # ----------------------------------------------------
 
         messages_consumed_total.inc()
 
         start_time = time.perf_counter()
 
+        partition_id = message.partition()
+
 
         try:
 
             # ------------------------------------------------
-            # Decode Kafka Message
+            # Get processor for this partition
+            # ------------------------------------------------
+
+            processor = partition_processors.get(
+                partition_id
+            )
+
+            if processor is None:
+
+                print(
+                    f"No processor available for "
+                    f"partition {partition_id}"
+                )
+
+                processing_errors_total.inc()
+
+                continue
+
+
+            # ------------------------------------------------
+            # Decode message
             # ------------------------------------------------
 
             data = json.loads(
@@ -204,7 +268,7 @@ try:
 
 
             # ------------------------------------------------
-            # Extract Event Data
+            # Extract data
             # ------------------------------------------------
 
             truck_id = data["truck_id"]
@@ -217,7 +281,7 @@ try:
 
 
             # ------------------------------------------------
-            # Validate Temperature
+            # Validate temperature
             # ------------------------------------------------
 
             if temperature < -50 or temperature > 100:
@@ -230,9 +294,7 @@ try:
 
                 processing_errors_total.inc()
 
-                # Invalid data should not remain
-                # permanently in the Kafka group.
-
+                # Invalid messages are intentionally skipped.
                 consumer.commit(
                     message=message,
                     asynchronous=False
@@ -242,51 +304,45 @@ try:
 
 
             # ------------------------------------------------
-            # Track Active Trucks
+            # Active truck metric
             # ------------------------------------------------
-
-            active_truck_ids.add(
-                truck_id
-            )
 
             active_trucks.set(
-                len(active_truck_ids)
+                len(
+                    {
+                        key
+                        for key in partition_processors.keys()
+                    }
+                )
             )
 
 
             # ------------------------------------------------
-            # Process Temperature
+            # Process event
             # ------------------------------------------------
-            #
-            # IMPORTANT:
-            # Temperature state is written to RocksDB
-            # before the Kafka offset is committed.
-            #
-            # This provides state recovery after restart.
-            #
 
             result = processor.process(
                 truck_id,
                 temperature,
-                timestamp
+                timestamp,
             )
 
 
             # ------------------------------------------------
-            # Processing Information
+            # Processing output
             # ------------------------------------------------
 
             print(
                 f"Processed | "
                 f"truck={truck_id} | "
                 f"temperature={temperature:.2f}°C | "
-                f"partition={message.partition()} | "
+                f"partition={partition_id} | "
                 f"offset={message.offset()}"
             )
 
 
             # ------------------------------------------------
-            # Completed 5-Minute Window
+            # 5-minute window completed
             # ------------------------------------------------
 
             if result is not None:
@@ -303,14 +359,14 @@ try:
 
 
             # ------------------------------------------------
-            # Successfully Processed
+            # Processing successful
             # ------------------------------------------------
 
             messages_processed_total.inc()
 
 
             # ------------------------------------------------
-            # Processing Latency
+            # Processing latency
             # ------------------------------------------------
 
             latency = (
@@ -324,16 +380,8 @@ try:
 
 
             # ------------------------------------------------
-            # Manual Kafka Offset Commit
+            # Manual Kafka offset commit
             # ------------------------------------------------
-            #
-            # Commit ONLY after:
-            #
-            # 1. Message was decoded
-            # 2. Temperature was validated
-            # 3. RocksDB state was updated
-            # 4. Processing completed successfully
-            #
 
             consumer.commit(
                 message=message,
@@ -342,7 +390,7 @@ try:
 
 
         # ----------------------------------------------------
-        # Invalid Message
+        # Invalid message
         # ----------------------------------------------------
 
         except (
@@ -354,16 +402,12 @@ try:
             processing_errors_total.inc()
 
             print(
-                f"Invalid message ignored: "
-                f"{error}"
+                f"Invalid message ignored: {error}"
             )
-
-            # Do not commit malformed messages here.
-            # They remain available for investigation.
 
 
         # ----------------------------------------------------
-        # Unexpected Processing Error
+        # Unexpected error
         # ----------------------------------------------------
 
         except Exception as error:
@@ -371,29 +415,24 @@ try:
             processing_errors_total.inc()
 
             print(
-                f"Processing error: "
-                f"{error}"
+                f"Processing error: {error}"
             )
-
-            # Do not commit unexpected failures.
-            # This prevents losing the event.
 
 
 # ============================================================
-# Graceful Shutdown
+# Shutdown
 # ============================================================
 
 except KeyboardInterrupt:
 
-    print(
-        "\nStopping StreamForge worker..."
-    )
+    print()
+    print("Stopping StreamForge worker...")
 
 
 except KafkaException as error:
 
     print(
-        f"\nKafka exception: {error}"
+        f"Kafka exception: {error}"
     )
 
 
@@ -401,10 +440,18 @@ finally:
 
     worker_up.set(0)
 
-    state_store.close()
+    # Close all partition state stores.
+    for store in partition_stores.values():
+
+        try:
+            store.close()
+
+        except Exception:
+            pass
+
+    partition_stores.clear()
+    partition_processors.clear()
 
     consumer.close()
 
-    print(
-        "Worker stopped."
-    )
+    print("Worker stopped.")

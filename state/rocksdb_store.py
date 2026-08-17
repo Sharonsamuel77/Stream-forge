@@ -1,10 +1,21 @@
 from rocksdict import Rdict
-DB_PATH = "data/rocksdb"
-class RocksDBStateStore:
-    """RocksDB-backed state store for truck processing."""
+from pathlib import Path
 
-    def __init__(self, db_path=DB_PATH):
-        self.db = Rdict(db_path)
+
+BASE_DB_PATH = "data/rocksdb"
+
+
+class RocksDBStateStore:
+    """RocksDB-backed state store scoped to a Kafka partition."""
+
+    def __init__(self, partition):
+        self.partition = partition
+
+        db_path = Path(BASE_DB_PATH) / f"partition_{partition}"
+        db_path.mkdir(parents=True, exist_ok=True)
+
+        self.db_path = str(db_path)
+        self.db = Rdict(self.db_path)
 
     def put(self, key, value):
         self.db[key] = value
