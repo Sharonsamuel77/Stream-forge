@@ -166,13 +166,19 @@ def summary():
         for truck in data.values()
     )
 
-    avg_temp = round(
-        sum(
-            truck["avg_temperature"]
-            for truck in data.values()
-        ) / total_trucks,
-        2
-    )
+    if total_trucks > 0:
+
+        avg_temp = round(
+            sum(
+                truck["avg_temperature"]
+                for truck in data.values()
+            ) / total_trucks,
+            2
+        )
+
+    else:
+
+        avg_temp = 0
     alerts_count = 0
 
     for truck in data.values():
@@ -182,10 +188,14 @@ def summary():
     active_workers = 0
 
     try:
-        with open("data/worker_status.json", "r") as f:
+        with open("data/rocksdb/worker_status.json", "r") as f:
             workers = json.load(f)
 
-        active_workers = len(workers)
+        active_workers = sum(
+            1
+            for worker in workers.values()
+            if worker["status"] == "active"
+        )
 
     except Exception:
         active_workers = 0
@@ -249,8 +259,20 @@ def alerts():
 
 @app.get("/recovery")
 def recovery():
+
+    records = 0
+
+    try:
+        with open("data/state_snapshot.json", "r") as f:
+            data = json.load(f)
+
+        records = len(data)
+
+    except Exception:
+        records = 0
+
     return {
         "status": "Recovered",
         "state_store": "RocksDB",
-        "records": 10
+        "records": records
     }

@@ -30,13 +30,13 @@ class RocksDBStateStore:
         return list(self.db.items())
 
     def count(self):
-        return len(self.db)
+        return sum(1 for _ in self.db.items())
 
     def recovery_info(self):
         return {
             "status": "Recovered",
             "state_store": "RocksDB",
-            "records": len(self.db)
+            "records": sum(1 for _ in self.db.items())
         }
 
     def close(self):
