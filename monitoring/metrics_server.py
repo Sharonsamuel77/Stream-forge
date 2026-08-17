@@ -49,7 +49,7 @@ def start_metrics_server():
     print("   StreamForge Metrics Server")
     print("===================================")
     print("Prometheus metrics available at:")
-    print("http://localhost:8000/metrics")
+    print("http://localhost:9000/metrics")
     print("Press Ctrl+C to stop")
 
 
