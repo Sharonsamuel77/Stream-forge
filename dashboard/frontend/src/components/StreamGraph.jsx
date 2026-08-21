@@ -1,67 +1,185 @@
-import ReactFlow, { Controls, Background } from "reactflow";
+import React, { useEffect, useState } from "react";
+import ReactFlow, {
+  Controls,
+  Background,
+} from "reactflow";
+
 import "reactflow/dist/style.css";
 
-const nodes = [
-  {
-    id: "kafka",
-    position: { x: 250, y: 20 },
-    data: { label: "Kafka" },
-  },
-  {
-    id: "p0",
-    position: { x: 50, y: 150 },
-    data: { label: "Partition 0" },
-  },
-  {
-    id: "p1",
-    position: { x: 250, y: 150 },
-    data: { label: "Partition 1" },
-  },
-  {
-    id: "p2",
-    position: { x: 450, y: 150 },
-    data: { label: "Partition 2" },
-  },
-  {
-    id: "w1",
-    position: { x: 50, y: 300 },
-    data: { label: "Worker 1" },
-  },
-  {
-    id: "w2",
-    position: { x: 250, y: 300 },
-    data: { label: "Worker 2" },
-  },
-  {
-    id: "w3",
-    position: { x: 450, y: 300 },
-    data: { label: "Worker 3" },
-  },
-];
-
-const edges = [
-  { id: "e1", source: "kafka", target: "p0" },
-  { id: "e2", source: "kafka", target: "p1" },
-  { id: "e3", source: "kafka", target: "p2" },
-
-  { id: "e4", source: "p0", target: "w1" },
-  { id: "e5", source: "p1", target: "w2" },
-  { id: "e6", source: "p2", target: "w3" },
-];
+const API_URL = "http://127.0.0.1:8001";
+const WS_URL = "ws://127.0.0.1:8001/ws/metrics";
 
 function StreamGraph() {
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
+  const [totalThroughput, setTotalThroughput] = useState(0);
+  const [connected, setConnected] = useState(false);
+
+  // ==========================================================
+  // Load topology
+  // ==========================================================
+
+  useEffect(() => {
+    const loadTopology = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/topology`
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Topology request failed: ${response.status}`
+          );
+        }
+
+        const data = await response.json();
+
+        setNodes(data.nodes || []);
+        setEdges(data.edges || []);
+      } catch (error) {
+        console.error(
+          "Failed to load topology:",
+          error
+        );
+      }
+    };
+
+    loadTopology();
+
+    const timer = setInterval(
+      loadTopology,
+      5000
+    );
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // ==========================================================
+  // WebSocket metrics
+  // ==========================================================
+
+  useEffect(() => {
+    let websocket;
+    let reconnectTimer;
+
+    const connect = () => {
+      console.log(
+        "Connecting to StreamForge metrics..."
+      );
+
+      websocket = new WebSocket(WS_URL);
+
+      websocket.onopen = () => {
+        console.log(
+          "Connected to StreamForge metrics"
+        );
+
+        setConnected(true);
+      };
+
+      websocket.onmessage = (event) => {
+        try {
+          const metrics = JSON.parse(
+            event.data
+          );
+
+          setTotalThroughput(
+            Number(
+              metrics.total_events_sec || 0
+            )
+          );
+        } catch (error) {
+          console.error(
+            "Invalid WebSocket data:",
+            error
+          );
+        }
+      };
+
+      websocket.onerror = (error) => {
+        console.error(
+          "WebSocket error:",
+          error
+        );
+
+        setConnected(false);
+      };
+
+      websocket.onclose = () => {
+        console.log(
+          "Disconnected from StreamForge metrics"
+        );
+
+        setConnected(false);
+
+        reconnectTimer = setTimeout(
+          connect,
+          3000
+        );
+      };
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimer);
+
+      if (websocket) {
+        websocket.close();
+      }
+    };
+  }, []);
+
+  // ==========================================================
+  // Render
+  // ==========================================================
+
   return (
     <div className="stream-graph">
-      <h2>Stream Topology</h2>
-
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        fitView
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "10px",
+        }}
       >
-        <Background />
-        <Controls />
-      </ReactFlow>
+        <h2>Stream Topology</h2>
+
+        <div>
+          <span>
+            {connected
+              ? "🟢 Live"
+              : "🔴 Disconnected"}
+          </span>
+
+          <span
+            style={{
+              marginLeft: "20px",
+              fontWeight: "bold",
+            }}
+          >
+            Throughput:{" "}
+            {totalThroughput.toLocaleString()} msg/s
+          </span>
+        </div>
+      </div>
+
+      <div
+        style={{
+          width: "100%",
+          height: "500px",
+        }}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          fitView
+        >
+          <Background />
+          <Controls />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

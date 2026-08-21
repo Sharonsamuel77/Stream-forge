@@ -1,63 +1,74 @@
 import { useEffect, useState } from "react";
 import { API } from "../api";
 
-function WorkerTable() {
+export default function WorkerTable() {
   const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchWorkers = () => {
-      API.get("/workers")
-        .then((res) => {
-          console.log("Workers:", res.data);
-          setWorkers(res.data);
-        })
-        .catch((err) => console.error(err));
+    const loadData = async () => {
+      try {
+        const response = await API.get("/workers");
+
+        console.log("Workers:", response.data);
+
+        // Backend returns: { workers: [...] }
+        setWorkers(response.data.workers || []);
+      } catch (err) {
+        console.error("Failed to load workers:", err);
+        setWorkers([]);
+      } finally {
+        setLoading(false);
+      }
     };
 
-    fetchWorkers();
+    loadData();
 
-    const interval = setInterval(fetchWorkers, 3000);
+    const timer = setInterval(loadData, 3000);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, []);
 
   return (
-    <div className="workers-section">
+    <div className="worker-section">
       <h2>Workers</h2>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Worker</th>
-            <th>Status</th>
-            <th>Partition</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {workers.map((worker) => (
-            <tr key={worker.id}>
-              <td>{worker.id}</td>
-
-              <td
-                style={{
-                  color:
-                    worker.status === "active"
-                      ? "lime"
-                      : "red",
-                  fontWeight:"bold"
-                }}
-              >
-                {worker.status}
-              </td>
-
-              <td>{worker.partition}</td>
+      {loading ? (
+        <p>Loading...</p>
+      ) : workers.length === 0 ? (
+        <p>No active workers</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Worker</th>
+              <th>PID</th>
+              <th>Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {workers.map((worker) => (
+              <tr key={worker.id}>
+                <td>Worker #{worker.id}</td>
+                <td>{worker.pid}</td>
+
+                <td
+                  style={{
+                    color:
+                      worker.status === "HEALTHY"
+                        ? "#00d4ff"
+                        : "#ff6b6b",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {worker.status}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
-
-export default WorkerTable;

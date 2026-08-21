@@ -7,34 +7,25 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from "recharts";
 
 export default function ThroughputChart() {
-
   const [data, setData] = useState([]);
 
   useEffect(() => {
-
     const loadMetrics = async () => {
       try {
-
         const res = await API.get("/metrics");
 
         const point = {
           time: new Date().toLocaleTimeString(),
-          throughput: res.data.throughput
+          throughput: Number(res.data.throughput || 0),
         };
 
-        setData((prev) => {
-          const updated = [...prev, point];
-
-          // Keep only last 10 points
-          return updated.slice(-10);
-        });
-
+        setData((prev) => [...prev, point].slice(-10));
       } catch (err) {
-        console.error(err);
+        console.error("Throughput metrics error:", err);
       }
     };
 
@@ -43,22 +34,40 @@ export default function ThroughputChart() {
     const timer = setInterval(loadMetrics, 3000);
 
     return () => clearInterval(timer);
-
   }, []);
 
   return (
-    <div>
+    <div className="throughput-chart">
       <h2>Kafka Throughput</h2>
 
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
+        <LineChart
+          data={data}
+          margin={{
+            top: 10,
+            right: 20,
+            left: 10,
+            bottom: 10,
+          }}
+        >
           <CartesianGrid strokeDasharray="3 3" />
 
           <XAxis dataKey="time" />
 
-          <YAxis />
+          <YAxis
+            label={{
+              value: "Events/sec",
+              angle: -90,
+              position: "insideLeft",
+            }}
+          />
 
-          <Tooltip />
+          <Tooltip
+            formatter={(value) => [
+              `${value} events/sec`,
+              "Throughput",
+            ]}
+          />
 
           <Line
             type="monotone"
@@ -66,6 +75,7 @@ export default function ThroughputChart() {
             stroke="#00d4ff"
             strokeWidth={3}
             dot={false}
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>
