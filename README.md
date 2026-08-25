@@ -24,3 +24,27 @@ StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions
               │                   │
            Worker 1            Worker 2
            Worker 3            Worker N
+
+## Requirements
+
+Before running StreamForge, install the following software.
+
+### Software to Download
+
+| Software | Recommended Version | Purpose |
+|---|---|---|
+| Python | 3.11.x | Backend, workers and stream processing |
+| Git | Latest | Clone and manage the repository |
+| Docker Desktop | Latest | Run Apache Kafka |
+| WSL 2 | Latest | Required/recommended for Docker Desktop on Windows |
+| Node.js | LTS | Run the React frontend |
+| npm | Included with Node.js | Install frontend dependencies |
+
+### Python
+
+Install Python 3.11.x and make sure Python is added to PATH.
+
+Verify the installation:
+
+```powershell
+python --version
