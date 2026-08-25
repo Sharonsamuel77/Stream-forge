@@ -48,3 +48,28 @@ Verify the installation:
 
 ```powershell
 python --version
+
+# Stream Forge
+
+## Distributed Python Event Processor
+
+Stream Forge is a distributed real-time event processing system built using **Apache Kafka, Python, FastAPI, RocksDB, Prometheus, and React**.
+
+The system is designed to process high-volume IoT telemetry data from trucks. Incoming telemetry events are published to Kafka, distributed across Kafka partitions, and automatically assigned to multiple Python worker processes.
+
+Each worker processes its assigned partitions and maintains state using RocksDB. The system also provides a FastAPI monitoring API and a React-based dashboard for monitoring workers, partitions, throughput, lag, and system topology.
+
+---
+
+## Project Overview
+
+The main use case is an IoT fleet monitoring system where thousands of trucks continuously send temperature telemetry.
+
+Example event:
+
+```json
+{
+  "truck_id": 1001,
+  "temperature": 32.5,
+  "timestamp": "2026-08-14T20:00:00"
+}
