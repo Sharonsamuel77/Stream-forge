@@ -1,2 +1,101 @@
 # Stream-forge
 Distributed Python Event Processor.
+
+## Kafka Worker Partition Assignment
+
+StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
+
+### Architecture
+
+```text
+                    Kafka Broker
+                        |
+                truck_telemetry
+                        |
+              20 Kafka Partitions
+        ┌────┬────┬────┬────┬───────┐
+        P0   P1   P2   P3   ...     P19
+         \    \    \    \            /
+          \    \    \    \          /
+           └──── Consumer Group ────┘
+              streamforge-state-workers
+                        |
+              ┌─────────┴─────────┐
+              │                   │
+           Worker 1            Worker 2
+           Worker 3            Worker N
+
+## Requirements
+
+Before running StreamForge, install the following software.
+
+### Software to Download
+
+| Software | Recommended Version | Purpose |
+|---|---|---|
+| Python | 3.11.x | Backend, workers and stream processing |
+| Git | Latest | Clone and manage the repository |
+| Docker Desktop | Latest | Run Apache Kafka |
+| WSL 2 | Latest | Required/recommended for Docker Desktop on Windows |
+| Node.js | LTS | Run the React frontend |
+| npm | Included with Node.js | Install frontend dependencies |
+
+### Python
+
+Install Python 3.11.x and make sure Python is added to PATH.
+
+Verify the installation:
+
+```powershell
+python --version
+
+# Stream Forge
+
+## Distributed Python Event Processor
+
+Stream Forge is a distributed real-time event processing system built using **Apache Kafka, Python, FastAPI, RocksDB, Prometheus, and React**.
+
+The system is designed to process high-volume IoT telemetry data from trucks. Incoming telemetry events are published to Kafka, distributed across Kafka partitions, and automatically assigned to multiple Python worker processes.
+
+Each worker processes its assigned partitions and maintains state using RocksDB. The system also provides a FastAPI monitoring API and a React-based dashboard for monitoring workers, partitions, throughput, lag, and system topology.
+
+---
+
+## Project Overview
+
+The main use case is an IoT fleet monitoring system where thousands of trucks continuously send temperature telemetry.
+
+Example event:
+
+```json
+{
+  "truck_id": 1001,
+  "temperature": 32.5,
+  "timestamp": "2026-08-14T20:00:00"
+}
+
+## Final Verification Status
+
+The Stream Forge system has been successfully tested end-to-end.
+
+- ✅ **Kafka broker** — Working
+- ✅ **20 Kafka partitions** — Working
+- ✅ **Multiple Python workers** — Working
+- ✅ **Dynamic partition → worker assignment** — Working
+- ✅ **Consumer-group rebalancing** — Working
+- ✅ **Worker failure and recovery** — Working
+- ✅ **Telemetry ingestion** — Working
+- ✅ **5-minute rolling temperature processing** — Working
+- ✅ **RocksDB state persistence** — Working
+- ✅ **Kafka offset commits** — Working
+- ✅ **FastAPI monitoring** — Working
+- ✅ **WebSocket metrics** — Working
+- ✅ **React topology dashboard** — Working
+- ✅ **Throughput and metrics display** — Working
+- ✅ **End-to-end event processing** — Working
+
+### Verification Summary
+
+The system successfully demonstrates distributed event processing using Apache Kafka, with dynamic partition assignment across multiple Python workers, persistent state management using RocksDB, real-time monitoring through FastAPI and WebSockets, and visualization through the React dashboard.
+
+Worker failures were also tested to verify that Kafka automatically rebalances partitions among the remaining workers.

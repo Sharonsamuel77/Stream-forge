@@ -1,20 +1,31 @@
 from rocksdict import Rdict
+from pathlib import Path
 
-DB_PATH = "data/rocksdb"
+
+BASE_DB_PATH = "data/rocksdb"
 
 
 class RocksDBStateStore:
-    """RocksDB-backed state store for truck processing."""
+    """RocksDB-backed state store scoped to a Kafka partition."""
 
-    def __init__(self, db_path=DB_PATH):
+    def __init__(self, partition):
+        self.partition = partition
 
-        print("Loading state from RocksDB...")
+        db_path = Path(BASE_DB_PATH) / f"partition_{partition}"
+        db_path.mkdir(parents=True, exist_ok=True)
 
-        self.db = Rdict(db_path)
+        self.db_path = str(db_path)
+        self.db = Rdict(self.db_path)
+
+        print(
+            f"Loading state from RocksDB partition {partition}..."
+        )
 
         count = sum(1 for _ in self.db.items())
 
-        print(f"Recovered {count} records from RocksDB")
+        print(
+            f"Recovered {count} records from RocksDB"
+        )
 
     def put(self, key, value):
         self.db[key] = value
@@ -36,7 +47,8 @@ class RocksDBStateStore:
         return {
             "status": "Recovered",
             "state_store": "RocksDB",
-            "records": sum(1 for _ in self.db.items())
+            "partition": self.partition,
+            "records": self.count(),
         }
 
     def close(self):
