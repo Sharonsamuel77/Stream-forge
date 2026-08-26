@@ -38,6 +38,7 @@ shutdown_started = False
 # ============================================================
 
 def print_header():
+
     print()
     print("=" * 70)
     print("                    STREAM FORGE")
@@ -51,6 +52,7 @@ def print_header():
 # ============================================================
 
 def run_command(command, cwd=None):
+
     return subprocess.run(
         command,
         cwd=cwd,
@@ -65,22 +67,33 @@ def run_command(command, cwd=None):
 # START LONG RUNNING PROCESS
 # ============================================================
 
-def start_process(command, cwd=None, name="process"):
+def start_process(
+    command,
+    cwd=None,
+    name="process",
+    env=None
+):
 
     print(f"[START] {name}")
 
     creationflags = 0
 
     if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        creationflags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+        )
 
     process = subprocess.Popen(
         command,
         cwd=cwd,
         creationflags=creationflags,
+        env=env,
     )
 
-    processes.append((name, process))
+    processes.append(
+        (name, process)
+    )
 
     return process
 
@@ -106,13 +119,16 @@ def start_docker():
     )
 
     if result.returncode != 0:
+
         print("ERROR: Docker Compose failed.")
         print(result.stderr)
+
         sys.exit(1)
 
     print(result.stdout)
 
     print("Waiting for Kafka to start...")
+
     time.sleep(5)
 
     result = run_command(
@@ -126,12 +142,21 @@ def start_docker():
     )
 
     if result.returncode != 0:
-        print("ERROR: Could not inspect Kafka container.")
+
+        print(
+            "ERROR: Could not inspect Kafka container."
+        )
+
         print(result.stderr)
+
         sys.exit(1)
 
     if result.stdout.strip().lower() != "true":
-        print("ERROR: Kafka container is not running.")
+
+        print(
+            "ERROR: Kafka container is not running."
+        )
+
         sys.exit(1)
 
     print("[OK] Kafka is running.")
@@ -172,7 +197,8 @@ def check_topic():
         print()
 
         print(
-            f"run.py will NOT create or recreate '{KAFKA_TOPIC}'."
+            f"run.py will NOT create or recreate "
+            f"'{KAFKA_TOPIC}'."
         )
 
         print()
@@ -189,10 +215,14 @@ def check_topic():
         if "PartitionCount:" in line:
 
             try:
+
                 partition_count = int(
-                    line.split("PartitionCount:")[1]
+                    line.split(
+                        "PartitionCount:"
+                    )[1]
                     .split()[0]
                 )
+
             except Exception:
                 pass
 
@@ -204,22 +234,25 @@ def check_topic():
             f"{partition_count} partitions."
         )
 
-        if partition_count != 20:
+        if partition_count != MAX_WORKERS:
 
             print()
             print(
-                f"[WARNING] Expected 20 partitions, "
+                f"[WARNING] Expected "
+                f"{MAX_WORKERS} partitions, "
                 f"but found {partition_count}."
             )
 
             print(
-                "[WARNING] run.py will NOT modify the topic."
+                "[WARNING] run.py will NOT "
+                "modify the topic."
             )
 
     else:
 
         print(
-            f"[OK] Existing topic '{KAFKA_TOPIC}' found."
+            f"[OK] Existing topic "
+            f"'{KAFKA_TOPIC}' found."
         )
 
 
@@ -233,7 +266,10 @@ def ask_worker_count():
     print("[3/6] Worker configuration")
     print()
 
-    print(f"Maximum workers: {MAX_WORKERS}")
+    print(
+        f"Maximum workers: {MAX_WORKERS}"
+    )
+
     print()
 
     while True:
@@ -244,6 +280,7 @@ def ask_worker_count():
         ).strip()
 
         if value == "":
+
             return MAX_WORKERS
 
         try:
@@ -251,12 +288,15 @@ def ask_worker_count():
             count = int(value)
 
             if 1 <= count <= MAX_WORKERS:
+
                 return count
 
         except ValueError:
+
             pass
 
         print()
+
         print(
             f"Please enter a number between "
             f"1 and {MAX_WORKERS}."
@@ -270,7 +310,9 @@ def ask_worker_count():
 def start_producer():
 
     print()
-    print("[4/6] Starting telemetry producer...")
+    print(
+        "[4/6] Starting telemetry producer..."
+    )
     print()
 
     return start_process(
@@ -298,6 +340,26 @@ def start_workers(worker_count):
 
     for i in range(worker_count):
 
+        worker_id = f"worker-{i + 1}"
+
+        metrics_port = 8101 + i
+
+        env = os.environ.copy()
+
+        env[
+            "STREAMFORGE_WORKER_ID"
+        ] = worker_id
+
+        env[
+            "STREAMFORGE_METRICS_PORT"
+        ] = str(metrics_port)
+
+        print(
+            f"[START] Worker {i + 1}/{worker_count} "
+            f"| ID: {worker_id} "
+            f"| Metrics Port: {metrics_port}"
+        )
+
         start_process(
             [
                 str(PYTHON),
@@ -306,13 +368,16 @@ def start_workers(worker_count):
             ],
             cwd=ROOT,
             name=f"Worker {i + 1}/{worker_count}",
+            env=env,
         )
 
-        time.sleep(0.2)
+        time.sleep(0.5)
 
     print()
+
     print(
-        f"[OK] Started {worker_count} worker process(es)."
+        f"[OK] Started {worker_count} "
+        f"worker process(es)."
     )
 
 
@@ -355,7 +420,8 @@ def start_frontend():
     if not FRONTEND_DIR.exists():
 
         print(
-            "ERROR: Frontend directory does not exist:"
+            "ERROR: Frontend directory "
+            "does not exist:"
         )
 
         print(FRONTEND_DIR)
@@ -390,6 +456,7 @@ def open_browser():
 
     print()
     print("Waiting for frontend...")
+
     time.sleep(5)
 
     print()
@@ -398,30 +465,44 @@ def open_browser():
     print("=" * 70)
     print()
 
-    print(f"Frontend : {FRONTEND_URL}")
     print(
-        f"FastAPI  : http://{API_HOST}:{API_PORT}"
+        f"Frontend : {FRONTEND_URL}"
     )
+
     print(
-        f"API Docs : http://{API_HOST}:{API_PORT}/docs"
+        f"FastAPI  : "
+        f"http://{API_HOST}:{API_PORT}"
+    )
+
+    print(
+        f"API Docs : "
+        f"http://{API_HOST}:{API_PORT}/docs"
     )
 
     print()
+
     print(
-        "Press CTRL+C in this terminal to stop EVERYTHING."
+        "Press CTRL+C in this terminal "
+        "to stop EVERYTHING."
     )
+
     print()
 
     try:
 
-        webbrowser.open(FRONTEND_URL)
+        webbrowser.open(
+            FRONTEND_URL
+        )
 
-        print("[OK] Browser opened.")
+        print(
+            "[OK] Browser opened."
+        )
 
     except Exception as exc:
 
         print(
-            f"[WARNING] Browser could not be opened: {exc}"
+            f"[WARNING] Browser could not "
+            f"be opened: {exc}"
         )
 
         print(
@@ -436,12 +517,16 @@ def open_browser():
 def stop_process(name, process):
 
     if process is None:
+
         return
 
     if process.poll() is not None:
+
         return
 
-    print(f"[STOP] {name}")
+    print(
+        f"[STOP] {name}"
+    )
 
     try:
 
@@ -459,7 +544,9 @@ def stop_process(name, process):
 
             try:
 
-                process.wait(timeout=5)
+                process.wait(
+                    timeout=5
+                )
 
             except subprocess.TimeoutExpired:
 
@@ -470,8 +557,13 @@ def stop_process(name, process):
                 process.kill()
 
                 try:
-                    process.wait(timeout=3)
+
+                    process.wait(
+                        timeout=3
+                    )
+
                 except Exception:
+
                     pass
 
         else:
@@ -480,7 +572,9 @@ def stop_process(name, process):
 
             try:
 
-                process.wait(timeout=5)
+                process.wait(
+                    timeout=5
+                )
 
             except subprocess.TimeoutExpired:
 
@@ -489,12 +583,16 @@ def stop_process(name, process):
     except Exception as exc:
 
         print(
-            f"[WARNING] Error stopping {name}: {exc}"
+            f"[WARNING] Error stopping "
+            f"{name}: {exc}"
         )
 
         try:
+
             process.kill()
+
         except Exception:
+
             pass
 
 
@@ -505,7 +603,10 @@ def stop_process(name, process):
 def stop_docker():
 
     print()
-    print("[DOCKER] Stopping Docker Compose services...")
+    print(
+        "[DOCKER] Stopping Docker "
+        "Compose services..."
+    )
     print()
 
     try:
@@ -524,14 +625,15 @@ def stop_docker():
             print(result.stdout)
 
             print(
-                "[OK] Docker Compose services stopped."
+                "[OK] Docker Compose "
+                "services stopped."
             )
 
         else:
 
             print(
-                "[WARNING] Docker Compose shutdown "
-                "returned an error."
+                "[WARNING] Docker Compose "
+                "shutdown returned an error."
             )
 
             print(result.stderr)
@@ -539,7 +641,8 @@ def stop_docker():
     except Exception as exc:
 
         print(
-            f"[WARNING] Docker shutdown failed: {exc}"
+            f"[WARNING] Docker shutdown failed: "
+            f"{exc}"
         )
 
 
@@ -552,6 +655,7 @@ def shutdown():
     global shutdown_started
 
     if shutdown_started:
+
         return
 
     shutdown_started = True
@@ -559,7 +663,9 @@ def shutdown():
     print()
     print()
     print("=" * 70)
-    print("              STOPPING STREAM FORGE")
+    print(
+        "              STOPPING STREAM FORGE"
+    )
     print("=" * 70)
     print()
 
@@ -567,7 +673,9 @@ def shutdown():
     # Stop Python / Node processes first.
     # --------------------------------------------------------
 
-    for name, process in reversed(processes):
+    for name, process in reversed(
+        processes
+    ):
 
         stop_process(
             name,
@@ -577,26 +685,23 @@ def shutdown():
     processes.clear()
 
     # --------------------------------------------------------
-    # Then stop Docker Compose.
+    # Stop Docker Compose.
     #
     # This stops:
     #   Kafka
     #   Prometheus
     #
-    # It does NOT run:
-    #   kafka-topics --delete
-    #   kafka-topics --create
-    #   kafka-storage format
-    #
-    # Therefore run.py does not intentionally delete/recreate
-    # the truck_telemetry topic.
+    # It does NOT intentionally delete
+    # or recreate the Kafka topic.
     # --------------------------------------------------------
 
     stop_docker()
 
     print()
     print("=" * 70)
-    print("             STREAM FORGE STOPPED")
+    print(
+        "             STREAM FORGE STOPPED"
+    )
     print("=" * 70)
     print()
 
@@ -605,14 +710,20 @@ def shutdown():
 # SIGNAL HANDLERS
 # ============================================================
 
-def handle_sigint(signum, frame):
+def handle_sigint(
+    signum,
+    frame
+):
 
     shutdown()
 
     raise SystemExit(0)
 
 
-def handle_sigterm(signum, frame):
+def handle_sigterm(
+    signum,
+    frame
+):
 
     shutdown()
 
@@ -628,13 +739,16 @@ def main():
     if not PYTHON.exists():
 
         print()
+
         print(
-            "ERROR: Virtual environment Python not found:"
+            "ERROR: Virtual environment "
+            "Python not found:"
         )
 
         print(PYTHON)
 
         print()
+
         sys.exit(1)
 
     signal.signal(
@@ -642,7 +756,10 @@ def main():
         handle_sigint
     )
 
-    if hasattr(signal, "SIGTERM"):
+    if hasattr(
+        signal,
+        "SIGTERM"
+    ):
 
         signal.signal(
             signal.SIGTERM,
@@ -669,7 +786,9 @@ def main():
         # 3. Worker count
         # ----------------------------------------------------
 
-        worker_count = ask_worker_count()
+        worker_count = (
+            ask_worker_count()
+        )
 
         # ----------------------------------------------------
         # 4. Producer
@@ -683,7 +802,9 @@ def main():
         # 5. Workers
         # ----------------------------------------------------
 
-        start_workers(worker_count)
+        start_workers(
+            worker_count
+        )
 
         time.sleep(3)
 
@@ -715,35 +836,45 @@ def main():
 
             time.sleep(1)
 
-            # Check whether one of our processes died.
-            for name, process in list(processes):
+            # Check whether one of our
+            # processes died.
 
-                return_code = process.poll()
+            for name, process in list(
+                processes
+            ):
+
+                return_code = (
+                    process.poll()
+                )
 
                 if return_code is not None:
 
                     print()
+
                     print(
-                        f"[WARNING] {name} stopped."
+                        f"[WARNING] {name} "
+                        f"stopped."
                     )
 
                     print(
-                        f"Exit code: {return_code}"
+                        f"Exit code: "
+                        f"{return_code}"
                     )
 
-                    # Remove dead process.
                     processes.remove(
                         (name, process)
                     )
 
-            # If all application processes died,
-            # initiate full cleanup.
+            # If all application processes
+            # died, initiate cleanup.
+
             if not processes:
 
                 print()
+
                 print(
-                    "[WARNING] All application processes "
-                    "have stopped."
+                    "[WARNING] All application "
+                    "processes have stopped."
                 )
 
                 shutdown()
@@ -761,7 +892,9 @@ def main():
         print("ERROR")
         print("=" * 70)
         print()
+
         print(exc)
+
         print()
 
         shutdown()
@@ -778,4 +911,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
