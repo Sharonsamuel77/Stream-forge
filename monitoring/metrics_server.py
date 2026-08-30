@@ -46,7 +46,7 @@ worker_up = Gauge(
 # Metrics Server
 # ============================================================
 
-def start_metrics_server(port=8000):
+def start_metrics_server(port=9000):
     """Start the Prometheus metrics HTTP server."""
 
     start_http_server(port)

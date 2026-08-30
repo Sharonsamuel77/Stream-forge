@@ -14,26 +14,39 @@ export default function ThroughputChart() {
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    const loadMetrics = async () => {
+    let mounted = true;
+
+    const loadMetricsHistory = async () => {
       try {
-        const res = await API.get("/metrics");
+        const res = await API.get("/metrics/history");
 
-        const point = {
-          time: new Date().toLocaleTimeString(),
-          throughput: Number(res.data.throughput || 0),
-        };
+        if (!mounted) return;
 
-        setData((prev) => [...prev, point].slice(-10));
+        const history = Array.isArray(res.data)
+          ? res.data
+          : [];
+
+        const formatted = history
+          .slice(-20)
+          .map((point) => ({
+            time: point.time,
+            throughput: Number(point.throughput ?? 0),
+          }));
+
+        setData(formatted);
       } catch (err) {
-        console.error("Throughput metrics error:", err);
+        console.error("Throughput history error:", err);
       }
     };
 
-    loadMetrics();
+    loadMetricsHistory();
 
-    const timer = setInterval(loadMetrics, 3000);
+    const timer = setInterval(loadMetricsHistory, 2000);
 
-    return () => clearInterval(timer);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, []);
 
   return (
@@ -64,7 +77,7 @@ export default function ThroughputChart() {
 
           <Tooltip
             formatter={(value) => [
-              `${value} events/sec`,
+              `${Number(value).toFixed(2)} events/sec`,
               "Throughput",
             ]}
           />

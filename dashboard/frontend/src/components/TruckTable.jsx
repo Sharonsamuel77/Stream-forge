@@ -12,49 +12,19 @@ export default function TruckTable() {
       try {
         const response = await API.get("/state");
 
-        console.log("State:", response.data);
-
-        /*
-         * Backend returns:
-         *
-         * {
-         *   trucks: {
-         *     "1001": {
-         *       readings: 200,
-         *       avg_temperature: 32.5
-         *     },
-         *     ...
-         *   },
-         *   total_trucks: 10,
-         *   total_readings: 2260,
-         *   avg_temperature: 32.69
-         * }
-         */
-
-        const truckState = response.data?.trucks || {};
-
-        /*
-         * Convert the trucks object into an array
-         * so that we can safely use .map().
-         */
-        const truckList = Object.entries(truckState).map(
-          ([truckId, truck]) => ({
-            truck_id: truckId,
-            readings: Number(truck?.readings || 0),
-            avg_temperature: Number(
-              truck?.avg_temperature || 0
-            ),
-          })
-        );
+        const truckList = Array.isArray(response.data)
+          ? response.data.map((truck) => ({
+              truck_id: truck.truck_id,
+              readings: Number(truck.readings || 0),
+              avg_temperature: Number(truck.avg_temperature || 0),
+            }))
+          : [];
 
         if (mounted) {
           setTrucks(truckList);
         }
-      } catch (err) {
-        console.error(
-          "Failed to load truck data:",
-          err
-        );
+      } catch (error) {
+        console.error("Failed to load truck data:", error);
 
         if (mounted) {
           setTrucks([]);
@@ -68,10 +38,7 @@ export default function TruckTable() {
 
     loadData();
 
-    const timer = setInterval(
-      loadData,
-      3000
-    );
+    const timer = setInterval(loadData, 3000);
 
     return () => {
       mounted = false;
@@ -81,7 +48,6 @@ export default function TruckTable() {
 
   return (
     <div className="truck-section">
-
       <h2>Truck Telemetry</h2>
 
       {loading ? (
@@ -90,7 +56,6 @@ export default function TruckTable() {
         <p>No truck state available</p>
       ) : (
         <table>
-
           <thead>
             <tr>
               <th>Truck ID</th>
@@ -101,11 +66,8 @@ export default function TruckTable() {
           </thead>
 
           <tbody>
-
             {trucks.map((truck) => {
-
-              const temperature =
-                truck.avg_temperature;
+              const temperature = truck.avg_temperature;
 
               let status = "NORMAL";
               let statusColor = "#22c55e";
@@ -119,22 +81,10 @@ export default function TruckTable() {
               }
 
               return (
-                <tr
-                  key={truck.truck_id}
-                >
-
-                  <td>
-                    Truck {truck.truck_id}
-                  </td>
-
-                  <td>
-                    {truck.readings.toLocaleString()}
-                  </td>
-
-                  <td>
-                    {temperature.toFixed(2)} Â°C
-                  </td>
-
+                <tr key={truck.truck_id}>
+                  <td>Truck {truck.truck_id}</td>
+                  <td>{truck.readings.toLocaleString()}</td>
+                  <td>{temperature.toFixed(2)} °C</td>
                   <td
                     style={{
                       color: statusColor,
@@ -143,16 +93,12 @@ export default function TruckTable() {
                   >
                     {status}
                   </td>
-
                 </tr>
               );
             })}
-
           </tbody>
-
         </table>
       )}
-
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { API } from "../api";
 
 function MetricCards() {
@@ -27,7 +27,9 @@ function MetricCards() {
         const data = metricsResponse.data || {};
 
         setMetrics({
-          throughput: Number(data.throughput ?? 0),
+          throughput: Number(
+            data.throughput ?? data.total_events_sec ?? 0
+          ),
           total_lag: Number(data.total_lag ?? 0),
           partitions: Number(
             data.partitions ?? data.partition_count ?? 0
@@ -70,15 +72,13 @@ function MetricCards() {
 
       <div className="metric-card">
         <h3>Avg Temperature</h3>
-        <h2>
-          {Number(summary.avg_temperature ?? 0).toFixed(2)}�C
-        </h2>
+        <h2>{Number(summary.avg_temperature ?? 0).toFixed(2)}°C</h2>
       </div>
 
       <div className="metric-card">
         <h3>Throughput</h3>
         <h2>
-          {Number(metrics.throughput).toLocaleString(undefined, {
+          {metrics.throughput.toLocaleString(undefined, {
             maximumFractionDigits: 2,
           })} events/sec
         </h2>

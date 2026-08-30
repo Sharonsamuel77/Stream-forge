@@ -13,7 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-PYTHON = ROOT / "venv" / "Scripts" / "python.exe"
+# Use the same Python installation that launched run.py
+PYTHON = Path(sys.executable)
 
 KAFKA_CONTAINER = "streamforge-kafka"
 
@@ -517,11 +518,9 @@ def open_browser():
 def stop_process(name, process):
 
     if process is None:
-
         return
 
     if process.poll() is not None:
-
         return
 
     print(
@@ -655,7 +654,6 @@ def shutdown():
     global shutdown_started
 
     if shutdown_started:
-
         return
 
     shutdown_started = True
@@ -669,9 +667,7 @@ def shutdown():
     print("=" * 70)
     print()
 
-    # --------------------------------------------------------
     # Stop Python / Node processes first.
-    # --------------------------------------------------------
 
     for name, process in reversed(
         processes
@@ -684,16 +680,7 @@ def shutdown():
 
     processes.clear()
 
-    # --------------------------------------------------------
     # Stop Docker Compose.
-    #
-    # This stops:
-    #   Kafka
-    #   Prometheus
-    #
-    # It does NOT intentionally delete
-    # or recreate the Kafka topic.
-    # --------------------------------------------------------
 
     stop_docker()
 
@@ -736,18 +723,23 @@ def handle_sigterm(
 
 def main():
 
+    print_header()
+
+    # Use the currently active Python interpreter.
+
+    print(
+        f"Python    : {PYTHON}"
+    )
+
+    print()
+
     if not PYTHON.exists():
 
-        print()
-
         print(
-            "ERROR: Virtual environment "
-            "Python not found:"
+            "ERROR: Python executable not found:"
         )
 
         print(PYTHON)
-
-        print()
 
         sys.exit(1)
 
@@ -765,8 +757,6 @@ def main():
             signal.SIGTERM,
             handle_sigterm
         )
-
-    print_header()
 
     try:
 
@@ -836,9 +826,6 @@ def main():
 
             time.sleep(1)
 
-            # Check whether one of our
-            # processes died.
-
             for name, process in list(
                 processes
             ):
@@ -864,9 +851,6 @@ def main():
                     processes.remove(
                         (name, process)
                     )
-
-            # If all application processes
-            # died, initiate cleanup.
 
             if not processes:
 

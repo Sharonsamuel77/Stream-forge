@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { API } from "../api";
 
 export default function AlertsPanel() {
@@ -7,15 +7,22 @@ export default function AlertsPanel() {
   useEffect(() => {
     const loadAlerts = async () => {
       try {
-        const res = await API.get("/alerts");
+        const res = await API.get("/metrics");
 
-        const data = res.data || {};
+        const metrics = res.data || {};
+        const totalLag = Number(metrics.total_lag ?? 0);
 
-        setAlerts(
-          Array.isArray(data.alerts)
-            ? data.alerts
-            : []
-        );
+        if (totalLag > 0) {
+          setAlerts([
+            {
+              truck_id: "Kafka",
+              severity: "HIGH",
+              message: `${totalLag.toLocaleString()} message(s) have consumer lag`,
+            },
+          ]);
+        } else {
+          setAlerts([]);
+        }
       } catch (err) {
         console.error("Alerts:", err);
       }
@@ -38,27 +45,21 @@ export default function AlertsPanel() {
         <table>
           <thead>
             <tr>
-              <th>Truck</th>
-              <th>Temperature</th>
+              <th>Source</th>
+              <th>Condition</th>
               <th>Severity</th>
             </tr>
           </thead>
 
           <tbody>
             {alerts.map((alert, index) => (
-              <tr key={`${alert.truck_id}-${index}`}>
+              <tr key={index}>
                 <td>{alert.truck_id}</td>
-
-                <td>
-                  {Number(alert.temperature).toFixed(2)} °C
-                </td>
-
+                <td>{alert.message}</td>
                 <td
                   style={{
                     color:
-                      alert.severity === "HIGH"
-                        ? "red"
-                        : alert.severity === "CRITICAL"
+                      alert.severity === "CRITICAL"
                         ? "red"
                         : "orange",
                     fontWeight: "bold",

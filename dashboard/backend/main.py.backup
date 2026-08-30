@@ -33,8 +33,8 @@ app.add_middleware(
 
 metrics_history = []
 
-throughput_samples = []
-latest_throughput = 0.0
+last_processed_value = None
+last_metrics_time = None
 
 
 # --------------------------------------------------
@@ -87,7 +87,8 @@ def get_state():
 @app.get("/metrics")
 def metrics():
 
-    global latest_throughput
+    global last_processed_value
+    global last_metrics_time
 
     try:
 
@@ -165,43 +166,44 @@ def metrics():
 
 
     # --------------------------------------------------
-    # Calculate stable throughput
+    # Calculate real throughput
     # --------------------------------------------------
 
     current_time_seconds = time.time()
 
-    throughput_samples.append(
-        (current_time_seconds, processed_value)
-    )
+    current_throughput = 0
 
-    # Keep only the last 5 seconds of samples
+    if (
+        last_processed_value is not None
+        and last_metrics_time is not None
+    ):
 
-    cutoff_time = current_time_seconds - 10
+        elapsed = (
+            current_time_seconds
+            - last_metrics_time
+        )
 
-    throughput_samples[:] = [
-        sample
-        for sample in throughput_samples
-        if sample[0] >= cutoff_time
-    ]
-
-    current_throughput = 0.0
-
-    if len(throughput_samples) >= 2:
-
-        oldest_time, oldest_processed = throughput_samples[0]
-        newest_time, newest_processed = throughput_samples[-1]
-
-        elapsed = newest_time - oldest_time
-        processed_difference = newest_processed - oldest_processed
+        processed_difference = (
+            processed_value
+            - last_processed_value
+        )
 
         if elapsed > 0 and processed_difference >= 0:
-            current_throughput = round(
-                processed_difference / elapsed,
-                2
-            )
-    latest_throughput = current_throughput
 
-# --------------------------------------------------
+            current_throughput = int(
+                processed_difference / elapsed
+            )
+
+
+    # --------------------------------------------------
+    # Store current values for next calculation
+    # --------------------------------------------------
+
+    last_processed_value = processed_value
+    last_metrics_time = current_time_seconds
+
+
+    # --------------------------------------------------
     # History
     # --------------------------------------------------
 
@@ -622,11 +624,50 @@ async def websocket_metrics(websocket: WebSocket):
 
     await websocket.accept()
 
+    previous_processed = None
+    previous_time = None
+
     try:
         while True:
 
             try:
-                throughput = float(latest_throughput)
+                response = requests.get(
+                    "http://localhost:9000/metrics",
+                    timeout=5
+                )
+
+                response.raise_for_status()
+
+                text = response.text
+
+                processed = re.search(
+                    r"streamforge_messages_processed_total\s+([0-9.]+)",
+                    text
+                )
+
+                processed_value = (
+                    float(processed.group(1))
+                    if processed
+                    else 0
+                )
+
+                current_time = time.time()
+
+                throughput = 0
+
+                if (
+                    previous_processed is not None
+                    and previous_time is not None
+                ):
+
+                    elapsed = current_time - previous_time
+                    difference = processed_value - previous_processed
+
+                    if elapsed > 0 and difference >= 0:
+                        throughput = difference / elapsed
+
+                previous_processed = processed_value
+                previous_time = current_time
 
                 await websocket.send_json({
                     "throughput": round(throughput, 2),
@@ -646,6 +687,7 @@ async def websocket_metrics(websocket: WebSocket):
 
     except Exception:
         pass
+
 
 # --------------------------------------------------
 # Kafka Configuration
@@ -723,16 +765,5 @@ def get_total_lag():
     except Exception as e:
         print("Kafka lag error:", e)
         return 0
-
-
-
-
-
-
-
-
-
-
-
 
 

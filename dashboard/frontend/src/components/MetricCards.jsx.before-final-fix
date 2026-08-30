@@ -26,13 +26,13 @@ function MetricCards() {
 
         const data = metricsResponse.data || {};
 
-        setMetrics({
-          throughput: Number(data.throughput ?? 0),
+        setMetrics((prev) => ({
+          ...prev,
           total_lag: Number(data.total_lag ?? 0),
           partitions: Number(
             data.partitions ?? data.partition_count ?? 0
           ),
-        });
+        }));
       } catch (error) {
         console.error("Failed to load dashboard metrics:", error);
       }
@@ -45,6 +45,59 @@ function MetricCards() {
     return () => {
       mounted = false;
       clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let socket;
+    let reconnectTimer;
+
+    const connect = () => {
+      try {
+        socket = new WebSocket("ws://127.0.0.1:8002/ws/metrics");
+
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            const throughput = Number(
+              data.total_events_sec ??
+              data.throughput ??
+              0
+            );
+
+            if (Number.isFinite(throughput)) {
+              setMetrics((prev) => ({
+                ...prev,
+                throughput,
+              }));
+            }
+          } catch (error) {
+            console.error("Invalid WebSocket data:", error);
+          }
+        };
+
+        socket.onclose = () => {
+          reconnectTimer = setTimeout(connect, 2000);
+        };
+
+        socket.onerror = () => {
+          socket.close();
+        };
+      } catch (error) {
+        console.error("WebSocket connection error:", error);
+        reconnectTimer = setTimeout(connect, 2000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimer);
+
+      if (socket) {
+        socket.close();
+      }
     };
   }, []);
 
@@ -78,7 +131,7 @@ function MetricCards() {
       <div className="metric-card">
         <h3>Throughput</h3>
         <h2>
-          {Number(metrics.throughput).toLocaleString(undefined, {
+          {metrics.throughput.toLocaleString(undefined, {
             maximumFractionDigits: 2,
           })} events/sec
         </h2>
