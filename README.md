@@ -5,25 +5,42 @@ Distributed Python Event Processor.
 
 StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
 
-### Architecture
+🏗️ Architecture
+Kafka Worker Partition Assignment
 
-```text
-                    Kafka Broker
-                        |
-                truck_telemetry
-                        |
-              20 Kafka Partitions
-        ┌────┬────┬────┬────┬───────┐
-        P0   P1   P2   P3   ...     P19
-         \    \    \    \            /
-          \    \    \    \          /
-           └──── Consumer Group ────┘
-              streamforge-state-workers
-                        |
-              ┌─────────┴─────────┐
-              │                   │
-           Worker 1            Worker 2
-           Worker 3            Worker N
+StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
+
+                    ┌──────────────────┐
+                    │   Kafka Broker   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    truck_telemetry
+                             │
+                             ▼
+                    20 Kafka Partitions
+                             │
+       ┌────┬────┬────┬─────┼─────┬────┐
+       │ P0 │ P1 │ P2 │ P3  │ ... │ P19│
+       └────┴────┴────┴─────┼─────┴────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │    Consumer Group    │
+                  │                      │
+                  │ streamforge-state-   │
+                  │ workers              │
+                  └──────────┬───────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+         ┌─────────┐    ┌─────────┐    ┌─────────┐
+         │ Worker 1│    │ Worker 2│    │ Worker N│
+         └─────────┘    └─────────┘    └─────────┘
+
+Kafka automatically assigns partitions to available workers.
+
+If a worker joins or leaves the consumer group, Kafka performs a rebalance and redistributes the partitions.
 
 ## Requirements
 
