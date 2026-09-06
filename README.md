@@ -1,6 +1,39 @@
 # Stream-forge
 Distributed Python Event Processor.
 
+## 📁 Project Structure
+Stream-forge/
+│
+├── api/
+│   └── API components
+│
+├── consumer/
+│   └── Kafka consumer components
+│
+├── dashboard/
+│   └── React dashboard
+│
+├── monitoring/
+│   └── Prometheus monitoring
+│
+├── producer/
+│   └── Telemetry producer
+│
+├── state/
+│   └── RocksDB state management
+│
+├── worker/
+│   └── telemetry_worker.py
+│
+├── docker-compose.yml
+├── requirements.txt
+├── run.py
+├── fastapi.py
+├── start_workers.ps1
+├── package.json
+├── package-lock.json
+└── README.md
+
 
 **🏗️ Architecture**
 
@@ -43,6 +76,22 @@ If a worker joins or leaves the consumer group, Kafka performs a rebalance and r
 ## Requirements
 
 Before running StreamForge, install the following software.
+
+## 🤝 Team Development
+
+The project is divided into independent modules:
+
+| Module     | Responsibility                   |
+| ---------- | -------------------------------- |
+| Producer   | Generate truck telemetry         |
+| Kafka      | Event streaming and partitioning |
+| Consumer   | Kafka consumption                |
+| Worker     | Event processing                 |
+| State      | RocksDB state management         |
+| Monitoring | Prometheus metrics               |
+| API        | FastAPI services                 |
+| Dashboard  | React visualization              |
+
 
 ### Software to Download
 
