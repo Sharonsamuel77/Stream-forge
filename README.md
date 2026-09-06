@@ -99,3 +99,32 @@ The Stream Forge system has been successfully tested end-to-end.
 The system successfully demonstrates distributed event processing using Apache Kafka, with dynamic partition assignment across multiple Python workers, persistent state management using RocksDB, real-time monitoring through FastAPI and WebSockets, and visualization through the React dashboard.
 
 Worker failures were also tested to verify that Kafka automatically rebalances partitions among the remaining workers.
+
+🧪 End-to-End Verification
+
+The complete system has been tested through the following workflow:
+Docker
+  ↓
+Kafka Broker
+  ↓
+truck_telemetry
+  ↓
+20 Kafka Partitions
+  ↓
+Consumer Group
+  ↓
+Multiple Python Workers
+  ↓
+Telemetry Processing
+  ↓
+5-Minute Rolling Average
+  ↓
+RocksDB State
+  ↓
+Kafka Offset Commit
+  ↓
+FastAPI / WebSockets
+  ↓
+Prometheus
+  ↓
+React Dashboard
