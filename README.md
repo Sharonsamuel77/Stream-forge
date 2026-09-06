@@ -6,6 +6,7 @@ Distributed Python Event Processor.
 StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
 
 🏗️ Architecture
+
 Kafka Worker Partition Assignment
 
 StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
