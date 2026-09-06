@@ -2,7 +2,7 @@
 Distributed Python Event Processor.
 
 
-##**🏗️ Architecture**
+**🏗️ Architecture**
 
 **Kafka Worker Partition Assignment**
 
