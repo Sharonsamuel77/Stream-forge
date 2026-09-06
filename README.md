@@ -27,6 +27,7 @@ Stream-forge/
 ├── package.json
 ├── package-lock.json
 └── README.md
+'''
 
 **🏗️ Architecture**
 
