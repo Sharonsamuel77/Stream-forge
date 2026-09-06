@@ -2,38 +2,31 @@
 Distributed Python Event Processor.
 
 ## 📁 Project Structure
+
+```text
 Stream-forge/
-│
 ├── api/
 │   └── API components
-│
 ├── consumer/
 │   └── Kafka consumer components
-│
 ├── dashboard/
 │   └── React dashboard
-│
 ├── monitoring/
 │   └── Prometheus monitoring
-│
 ├── producer/
 │   └── Telemetry producer
-│
 ├── state/
 │   └── RocksDB state management
-│
 ├── worker/
 │   └── telemetry_worker.py
-│
 ├── docker-compose.yml
+├── fastapi.py
 ├── requirements.txt
 ├── run.py
-├── fastapi.py
 ├── start_workers.ps1
 ├── package.json
 ├── package-lock.json
 └── README.md
-
 
 **🏗️ Architecture**
 
