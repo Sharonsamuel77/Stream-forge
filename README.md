@@ -96,7 +96,7 @@ The system successfully demonstrates distributed event processing using Apache K
 
 Worker failures were also tested to verify that Kafka automatically rebalances partitions among the remaining workers.
 
-##🧪 End-to-End Verification
+**🧪 End-to-End Verification**
 
 The complete system has been tested through the following workflow:
 Docker
@@ -125,7 +125,8 @@ Prometheus
   ↓
 React Dashboard
 
-## **✅ Final Verification Status**
+**✅ Final Verification Status**
+
 The StreamForge system has been tested end-to-end.
 
 | Component                               | Status    |
