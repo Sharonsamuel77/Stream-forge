@@ -33,6 +33,9 @@ _previous_offset_time = None
 _ws_previous_total_offset = None
 _ws_previous_offset_time = None
 
+# Dashboard throughput history
+_metrics_history = []
+
 
 # ============================================================
 # FastAPI
@@ -57,14 +60,6 @@ app.add_middleware(
 # ============================================================
 
 def get_all_worker_processes():
-    """
-    Return all processes whose command line contains
-    worker.telemetry_worker.
-
-    This keeps both parent and child telemetry worker
-    processes so that Kafka client PIDs can be resolved
-    to the actual logical worker process.
-    """
 
     processes = []
 
@@ -177,22 +172,6 @@ def resolve_worker_root_pid(
     pid,
     process_map,
 ):
-    """
-    Resolve a Kafka consumer PID to the logical
-    StreamForge worker PID.
-
-    Example:
-
-        Kafka client PID
-              |
-              v
-        child Python process
-              |
-              v
-        venv worker process
-
-    The venv worker process is returned.
-    """
 
     try:
 
@@ -225,13 +204,6 @@ def resolve_worker_root_pid(
 
         command_lower = command.lower()
 
-        # Actual StreamForge worker.
-        #
-        # Example:
-        #
-        # E:\stream-forge\venv\Scripts\python.exe
-        # -m worker.telemetry_worker
-        #
         if (
             "worker.telemetry_worker"
             in command_lower
@@ -269,17 +241,6 @@ def resolve_worker_root_pid(
 # ============================================================
 
 def get_worker_status():
-    """
-    Detect running StreamForge telemetry workers.
-
-    Returns:
-        [
-            {
-                "pid": 12345,
-                "command": "...",
-            }
-        ]
-    """
 
     workers = []
 
@@ -339,12 +300,14 @@ def get_worker_status():
                 continue
 
             try:
+
                 pid = int(pid)
 
             except (
                 ValueError,
                 TypeError,
             ):
+
                 continue
 
             workers.append(
@@ -372,7 +335,6 @@ def get_worker_status():
             f"Worker detection error: {error}"
         )
 
-    # Remove duplicate PIDs
     unique_workers = {}
 
     for worker in workers:
@@ -600,13 +562,6 @@ def get_rocksdb_info():
 def get_worker_pid_from_client_id(
     client_id
 ):
-    """
-    Kafka client IDs are expected to look like:
-
-        worker-9880
-
-    The PID can represent the child Kafka consumer.
-    """
 
     if not client_id:
         return None
@@ -650,22 +605,9 @@ def build_worker_mapping(
     partitions,
     workers,
 ):
-    """
-    Build:
-
-        Kafka partition
-             ↓
-        Kafka client PID
-             ↓
-        logical StreamForge worker PID
-    """
 
     if not partitions or not workers:
         return {}
-
-    # --------------------------------------------------------
-    # Get complete telemetry process tree
-    # --------------------------------------------------------
 
     all_processes = (
         get_all_worker_processes()
@@ -675,10 +617,6 @@ def build_worker_mapping(
         process["pid"]: process
         for process in all_processes
     }
-
-    # --------------------------------------------------------
-    # Known logical worker PIDs
-    # --------------------------------------------------------
 
     worker_pids = set()
 
@@ -699,10 +637,6 @@ def build_worker_mapping(
             continue
 
     mapping = {}
-
-    # --------------------------------------------------------
-    # Match every Kafka partition
-    # --------------------------------------------------------
 
     for partition in partitions:
 
@@ -729,22 +663,11 @@ def build_worker_mapping(
         if child_pid is None:
             continue
 
-        # ----------------------------------------------------
-        # Case 1:
-        # Kafka PID itself is a worker.
-        # ----------------------------------------------------
-
         if child_pid in worker_pids:
 
             logical_pid = child_pid
 
         else:
-
-            # ------------------------------------------------
-            # Case 2:
-            # Kafka PID is child process.
-            # Resolve it to parent worker.
-            # ------------------------------------------------
 
             logical_pid = (
                 resolve_worker_root_pid(
@@ -968,7 +891,6 @@ async def topology():
         if pid not in assigned_pids:
             assigned_pids.append(pid)
 
-    # Add workers with no current Kafka assignment.
     for worker in workers:
 
         try:
@@ -1215,6 +1137,7 @@ async def dashboard_metrics():
 
     global _previous_total_offset
     global _previous_offset_time
+    global _metrics_history
 
     partitions = (
         get_kafka_partitions()
@@ -1269,17 +1192,39 @@ async def dashboard_metrics():
         for partition in partitions
     )
 
+    throughput_value = round(
+        throughput,
+        2,
+    )
+
+    # --------------------------------------------------------
+    # Save throughput history
+    # --------------------------------------------------------
+
+    _metrics_history.append(
+        {
+            "time": time.strftime(
+                "%H:%M:%S"
+            ),
+
+            "throughput": throughput_value,
+        }
+    )
+
+    # Keep only latest 50 points
+    if len(_metrics_history) > 50:
+
+        _metrics_history = (
+            _metrics_history[-50:]
+        )
+
     return {
 
-        "throughput": round(
-            throughput,
-            2,
-        ),
+        "throughput":
+            throughput_value,
 
-        "total_events_sec": round(
-            throughput,
-            2,
-        ),
+        "total_events_sec":
+            throughput_value,
 
         "total_lag":
             total_lag,
@@ -1292,6 +1237,92 @@ async def dashboard_metrics():
 
         "timestamp":
             current_time,
+    }
+
+
+# ============================================================
+# Metrics History API
+# ============================================================
+
+@app.get("/metrics/history")
+async def metrics_history():
+
+    return _metrics_history[-50:]
+
+
+# ============================================================
+# Alerts API
+# ============================================================
+
+@app.get("/alerts")
+async def alerts():
+
+    partitions = (
+        get_kafka_partitions()
+    )
+
+    result = []
+
+    for partition in partitions:
+
+        lag = int(
+            partition.get(
+                "lag",
+                0,
+            )
+        )
+
+        if lag <= 0:
+            continue
+
+        partition_number = (
+            partition.get(
+                "partition",
+                0,
+            )
+        )
+
+        if lag >= 100:
+
+            severity = "CRITICAL"
+
+        elif lag >= 50:
+
+            severity = "HIGH"
+
+        else:
+
+            severity = "MEDIUM"
+
+        result.append(
+            {
+                "truck_id":
+                    f"Partition {partition_number}",
+
+                "temperature":
+                    0,
+
+                "severity":
+                    severity,
+
+                "lag":
+                    lag,
+
+                "partition":
+                    partition_number,
+
+                "message":
+                    (
+                        f"Kafka partition "
+                        f"{partition_number} "
+                        f"has lag of {lag}"
+                    ),
+            }
+        )
+
+    return {
+        "alerts": result,
+        "total_alerts": len(result),
     }
 
 
@@ -1926,3 +1957,41 @@ async def state():
 
             "avg_temperature": 0,
         }
+
+
+# ============================================================
+# Recovery
+# ============================================================
+
+@app.get("/recovery")
+def recovery():
+
+    records = 0
+
+    try:
+
+        with open(
+            STATE_SNAPSHOT,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            data = json.load(f)
+
+        records = len(data)
+
+    except Exception:
+
+        records = 0
+
+    return {
+
+        "status":
+            "Recovered",
+
+        "state_store":
+            "RocksDB",
+
+        "records":
+            records,
+    }

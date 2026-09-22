@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { API } from "../api";
 
 function MetricCards() {
@@ -71,7 +71,7 @@ function MetricCards() {
       <div className="metric-card">
         <h3>Avg Temperature</h3>
         <h2>
-          {Number(summary.avg_temperature ?? 0).toFixed(2)}�C
+          {Number(summary.avg_temperature ?? 0).toFixed(2)}°C
         </h2>
       </div>
 
@@ -115,3 +115,4 @@ function MetricCards() {
 }
 
 export default MetricCards;
+

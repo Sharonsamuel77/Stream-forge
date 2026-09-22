@@ -12,9 +12,9 @@ export default function TruckTable() {
       try {
         const response = await API.get("/state");
 
-        const truckList = Array.isArray(response.data)
-          ? response.data.map((truck) => ({
-              truck_id: truck.truck_id,
+        const truckList = response.data?.trucks
+          ? Object.entries(response.data.trucks).map(([truck_id, truck]) => ({
+              truck_id,
               readings: Number(truck.readings || 0),
               avg_temperature: Number(truck.avg_temperature || 0),
             }))
@@ -84,7 +84,7 @@ export default function TruckTable() {
                 <tr key={truck.truck_id}>
                   <td>Truck {truck.truck_id}</td>
                   <td>{truck.readings.toLocaleString()}</td>
-                  <td>{temperature.toFixed(2)} °C</td>
+                  <td>{temperature.toFixed(2)} Â°C</td>
                   <td
                     style={{
                       color: statusColor,
@@ -102,3 +102,5 @@ export default function TruckTable() {
     </div>
   );
 }
+
+

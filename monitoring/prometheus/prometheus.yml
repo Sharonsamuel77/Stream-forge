@@ -4,4 +4,24 @@ global:
 scrape_configs:
   - job_name: "streamforge"
     static_configs:
-      - targets: ["host.docker.internal:9000"]
+      - targets:
+          - "host.docker.internal:8101"
+          - "host.docker.internal:8102"
+          - "host.docker.internal:8103"
+          - "host.docker.internal:8104"
+          - "host.docker.internal:8105"
+          - "host.docker.internal:8106"
+          - "host.docker.internal:8107"
+          - "host.docker.internal:8108"
+          - "host.docker.internal:8109"
+          - "host.docker.internal:8110"
+          - "host.docker.internal:8111"
+          - "host.docker.internal:8112"
+          - "host.docker.internal:8113"
+          - "host.docker.internal:8114"
+          - "host.docker.internal:8115"
+          - "host.docker.internal:8116"
+          - "host.docker.internal:8117"
+          - "host.docker.internal:8118"
+          - "host.docker.internal:8119"
+          - "host.docker.internal:8120"

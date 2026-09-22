@@ -1,101 +1,339 @@
-# Stream-forge
-Distributed Python Event Processor.
-
-## Kafka Worker Partition Assignment
-
-StreamForge uses Apache Kafka consumer groups to distribute telemetry partitions dynamically among Python workers.
-
-### Architecture
-
-```text
-                    Kafka Broker
-                        |
-                truck_telemetry
-                        |
-              20 Kafka Partitions
-        ┌────┬────┬────┬────┬───────┐
-        P0   P1   P2   P3   ...     P19
-         \    \    \    \            /
-          \    \    \    \          /
-           └──── Consumer Group ────┘
-              streamforge-state-workers
-                        |
-              ┌─────────┴─────────┐
-              │                   │
-           Worker 1            Worker 2
-           Worker 3            Worker N
-
-## Requirements
-
-Before running StreamForge, install the following software.
-
-### Software to Download
-
-| Software | Recommended Version | Purpose |
-|---|---|---|
-| Python | 3.11.x | Backend, workers and stream processing |
-| Git | Latest | Clone and manage the repository |
-| Docker Desktop | Latest | Run Apache Kafka |
-| WSL 2 | Latest | Required/recommended for Docker Desktop on Windows |
-| Node.js | LTS | Run the React frontend |
-| npm | Included with Node.js | Install frontend dependencies |
-
-### Python
-
-Install Python 3.11.x and make sure Python is added to PATH.
-
-Verify the installation:
-
-```powershell
-python --version
-
-# Stream Forge
+# StreamForge
 
 ## Distributed Python Event Processor
 
-Stream Forge is a distributed real-time event processing system built using **Apache Kafka, Python, FastAPI, RocksDB, Prometheus, and React**.
+StreamForge is a distributed real-time event processing system built using **Apache Kafka, Python, RocksDB, Prometheus, FastAPI, and React**.
 
-The system is designed to process high-volume IoT telemetry data from trucks. Incoming telemetry events are published to Kafka, distributed across Kafka partitions, and automatically assigned to multiple Python worker processes.
-
-Each worker processes its assigned partitions and maintains state using RocksDB. The system also provides a FastAPI monitoring API and a React-based dashboard for monitoring workers, partitions, throughput, lag, and system topology.
+The project simulates an IoT truck fleet where vehicles continuously send temperature telemetry. Kafka distributes the incoming events across multiple partitions, Python workers process the events in parallel, RocksDB maintains persistent state, Prometheus monitors the system, and a React dashboard provides a real-time view of the system.
 
 ---
 
-## Project Overview
+## Project Architecture
 
-The main use case is an IoT fleet monitoring system where thousands of trucks continuously send temperature telemetry.
+```text
+                 IoT Truck Telemetry
+                         |
+                         v
+              +---------------------+
+              |    Kafka Producer    |
+              +---------------------+
+                         |
+                         v
+              +---------------------+
+              |    Apache Kafka     |
+              |  truck_telemetry    |
+              |    20 Partitions    |
+              +---------------------+
+                         |
+             +-----------+-----------+
+             |           |           |
+             v           v           v
+         Worker 1    Worker 2    Worker N
+             |           |           |
+             +-----------+-----------+
+                         |
+                         v
+              +---------------------+
+              |   Event Processing  |
+              | Temperature Average |
+              +---------------------+
+                         |
+                         v
+              +---------------------+
+              |       RocksDB       |
+              |   Persistent State  |
+              +---------------------+
 
-Example event:
+        +-----------------------------+
+        |     Prometheus Monitoring   |
+        | Throughput / Lag / Workers |
+        +-----------------------------+
+                       |
+                       v
+        +-----------------------------+
+        |       FastAPI Backend       |
+        +-----------------------------+
+                       |
+                       v
+        +-----------------------------+
+        |      React Dashboard        |
+        | Topology / Metrics / Alerts |
+        +-----------------------------+
+```
+
+---
+
+## Project Flow
+
+1. The producer generates truck temperature telemetry.
+2. Telemetry is published to the Kafka topic `truck_telemetry`.
+3. Kafka distributes events across **20 partitions**.
+4. Multiple Python workers consume the partitions through a Kafka consumer group.
+5. Workers process the incoming temperature events in parallel.
+6. The system calculates truck-wise temperature state, including a **5-minute rolling average**.
+7. RocksDB stores processing state for persistence and recovery.
+8. Kafka offsets are manually committed after processing.
+9. Prometheus collects monitoring metrics such as worker status, throughput, and Kafka lag.
+10. FastAPI provides monitoring and system-state APIs.
+11. The React dashboard displays the live system status, workers, partitions, readings, throughput, alerts, and topology.
+
+---
+
+## Example Telemetry Event
 
 ```json
 {
-  "truck_id": 1001,
+  "truck_id": "truck_1",
   "temperature": 32.5,
   "timestamp": "2026-08-14T20:00:00"
 }
+```
 
-## Final Verification Status
+---
 
-The Stream Forge system has been successfully tested end-to-end.
+## Main Components
 
-- ✅ **Kafka broker** — Working
-- ✅ **20 Kafka partitions** — Working
-- ✅ **Multiple Python workers** — Working
-- ✅ **Dynamic partition → worker assignment** — Working
-- ✅ **Consumer-group rebalancing** — Working
-- ✅ **Worker failure and recovery** — Working
-- ✅ **Telemetry ingestion** — Working
-- ✅ **5-minute rolling temperature processing** — Working
-- ✅ **RocksDB state persistence** — Working
-- ✅ **Kafka offset commits** — Working
-- ✅ **FastAPI monitoring** — Working
-- ✅ **WebSocket metrics** — Working
-- ✅ **React topology dashboard** — Working
-- ✅ **Throughput and metrics display** — Working
-- ✅ **End-to-end event processing** — Working
+### 1. Kafka Producer
 
-### Verification Summary
+Generates simulated truck telemetry and publishes it to:
 
-The system successfully demonstrates distributed event processing using Apache Kafka, with dynamic partition assignment across multiple Python workers, persistent state management using RocksDB, real-time monitoring through FastAPI and WebSockets, and visualization through the React dashboard.
+```text
+truck_telemetry
+```
 
-Worker failures were also tested to verify that Kafka automatically rebalances partitions among the remaining workers.
+### 2. Apache Kafka
+
+Kafka acts as the distributed messaging layer.
+
+The project uses:
+
+* 20 Kafka partitions
+* Kafka consumer groups
+* Dynamic partition assignment
+* Consumer-group rebalancing
+
+### 3. Python Workers
+
+Multiple workers process Kafka partitions in parallel.
+
+Workers handle:
+
+* Telemetry consumption
+* Temperature processing
+* State updates
+* Offset commits
+* Worker-level metrics
+
+### 4. RocksDB
+
+RocksDB is used for persistent state storage.
+
+It allows the system to retain truck processing state and recover state when workers restart.
+
+### 5. Prometheus
+
+Prometheus is used to monitor the distributed processing system.
+
+The monitoring layer tracks information such as:
+
+* Processed events
+* Consumed events
+* Processing errors
+* Worker activity
+* Throughput
+* Kafka lag
+* Active trucks
+* System health
+
+The StreamForge metrics server exposes Prometheus metrics at:
+
+```text
+http://localhost:9000/metrics
+```
+
+### 6. FastAPI
+
+FastAPI provides the backend APIs used by the dashboard.
+
+The backend provides information related to:
+
+* System summary
+* Worker status
+* Kafka partitions
+* Processing state
+* Alerts
+* Recovery status
+* Stream topology
+* WebSocket live metrics
+
+### 7. React Dashboard
+
+The React frontend provides a real-time monitoring interface.
+
+The dashboard displays:
+
+* Total trucks
+* Active workers
+* Total readings
+* Average temperature
+* Throughput
+* Kafka lag
+* Number of partitions
+* Active alerts
+* Worker health
+* Stream topology
+* RocksDB recovery status
+
+---
+
+## Technologies Used
+
+| Technology      | Purpose                       |
+| --------------- | ----------------------------- |
+| Python          | Event processing and workers  |
+| Apache Kafka    | Distributed event streaming   |
+| Confluent Kafka | Python Kafka client           |
+| RocksDB         | Persistent state storage      |
+| Prometheus      | Monitoring and metrics        |
+| FastAPI         | Backend monitoring API        |
+| WebSocket       | Live metric updates           |
+| React           | Frontend dashboard            |
+| React Flow      | Stream topology visualization |
+| Docker          | Kafka and Prometheus services |
+
+---
+
+## Requirements
+
+Install the following:
+
+* Python 3.11+
+* Git
+* Docker Desktop
+* Node.js LTS
+* npm
+
+Python dependencies are listed in `requirements.txt`.
+
+---
+
+## Running StreamForge
+
+### 1. Start Docker Services
+
+```powershell
+docker compose up -d
+```
+
+### 2. Start the Metrics Server
+
+```powershell
+python monitoring\metrics_server.py
+```
+
+Metrics are available at:
+
+```text
+http://localhost:9000/metrics
+```
+
+### 3. Start StreamForge
+
+```powershell
+python run.py
+```
+
+### 4. Start FastAPI
+
+```powershell
+python -m uvicorn dashboard.backend.main:app --reload --port 8001
+```
+
+The backend runs at:
+
+```text
+http://127.0.0.1:8001
+```
+
+### 5. Start the React Dashboard
+
+Navigate to:
+
+```text
+dashboard\frontend
+```
+
+Then run:
+
+```powershell
+npm.cmd run dev
+```
+
+The dashboard runs at:
+
+```text
+http://localhost:5173
+```
+
+---
+
+## Monitoring
+
+| Service         | Address                         |
+| --------------- | ------------------------------- |
+| Kafka           | `localhost:9092`                |
+| Prometheus      | `http://localhost:9090`         |
+| Metrics Server  | `http://localhost:9000/metrics` |
+| FastAPI         | `http://127.0.0.1:8001`         |
+| React Dashboard | `http://localhost:5173`         |
+
+---
+
+## Final Verification
+
+The StreamForge system was tested end-to-end with the following components working together:
+
+* Kafka broker
+* 20 Kafka partitions
+* Multiple Python workers
+* Dynamic partition assignment
+* Consumer-group rebalancing
+* Worker processing
+* 5-minute temperature processing
+* RocksDB state persistence
+* Kafka offset commits
+* Prometheus monitoring
+* FastAPI monitoring APIs
+* WebSocket metrics
+* React dashboard
+* React Flow stream topology
+* Throughput monitoring
+* Kafka lag monitoring
+* Worker health monitoring
+* End-to-end telemetry processing
+
+The final integration demonstrated the complete flow from telemetry generation through Kafka, distributed worker processing, state persistence, monitoring, and dashboard visualization.
+
+---
+
+## Team Contributions
+
+The project was developed as a team with separate modules for:
+
+* Kafka Producer and ingestion
+* Worker processing
+* RocksDB state and recovery
+* Prometheus monitoring
+* FastAPI and React dashboard
+
+### Monitoring Contribution
+
+The monitoring module focused on:
+
+* Prometheus integration
+* Metrics server
+* Prometheus scrape configuration
+* Worker and processing metrics
+* Throughput monitoring
+* Kafka lag monitoring
+* Integration of monitoring data with the dashboard

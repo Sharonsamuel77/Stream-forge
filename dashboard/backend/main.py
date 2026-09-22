@@ -12,45 +12,49 @@ from confluent_kafka.admin import AdminClient
 
 app = FastAPI()
 
-# --------------------------------------------------
+
+# ============================================================
 # CORS
-# --------------------------------------------------
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-],
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --------------------------------------------------
+
+# ============================================================
 # Throughput History
-# --------------------------------------------------
+# ============================================================
 
 metrics_history = []
 
 throughput_samples = []
+
 latest_throughput = 0.0
 
 
-# --------------------------------------------------
+# ============================================================
 # Home Endpoint
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/")
 def home():
+
     return {
         "message": "StreamForge Dashboard API"
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # State
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/state")
 def get_state():
@@ -61,10 +65,12 @@ def get_state():
         return []
 
     try:
+
         with open(path, "r") as f:
             data = json.load(f)
 
     except Exception:
+
         return []
 
     trucks = []
@@ -72,110 +78,146 @@ def get_state():
     for truck_id, info in data.items():
 
         trucks.append({
+
             "truck_id": truck_id,
+
             "avg_temperature": info["avg_temperature"],
+
             "readings": info["readings"]
+
         })
 
     return trucks
 
 
-# --------------------------------------------------
-# Live Metrics from Prometheus
-# --------------------------------------------------
+# ============================================================
+# Live Metrics
+# ============================================================
+
+# ============================================================
+# Live Metrics
+# ============================================================
 
 @app.get("/metrics")
 def metrics():
 
     global latest_throughput
 
-    try:
+    # --------------------------------------------------------
+    # Collect metrics from all worker metric servers
+    # --------------------------------------------------------
 
-        response = requests.get(
-            "http://localhost:9000/metrics",
-            timeout=5
-        )
+    worker_metrics = []
 
-        response.raise_for_status()
+    for port in range(8101, 8121):
 
-        text = response.text
+        try:
 
-    except Exception as e:
+            response = requests.get(
+                f"http://127.0.0.1:{port}/metrics",
+                timeout=0.2
+            )
+
+            response.raise_for_status()
+
+            worker_metrics.append(response.text)
+
+        except Exception:
+
+            continue
+
+    # --------------------------------------------------------
+    # No workers available
+    # --------------------------------------------------------
+
+    if not worker_metrics:
 
         return {
             "throughput": 0,
             "active_workers": 0,
             "failed_events": 0,
-            "error": str(e)
+            "partitions": get_partition_count(),
+            "total_lag": get_total_lag(),
+            "error": "No worker metrics available"
         }
 
+    # Combine metrics from all workers
+    text = "\n".join(worker_metrics)
 
-    # --------------------------------------------------
-    # Extract Prometheus metrics
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Extract metrics from ALL workers
+    # --------------------------------------------------------
 
-    consumed = re.search(
+    consumed_values = re.findall(
         r"streamforge_messages_consumed_total\s+([0-9.]+)",
         text
     )
 
-    processed = re.search(
+    processed_values = re.findall(
         r"streamforge_messages_processed_total\s+([0-9.]+)",
         text
     )
 
-    errors = re.search(
+    error_values = re.findall(
         r"streamforge_processing_errors_total\s+([0-9.]+)",
         text
     )
 
-    worker_up = re.search(
+    worker_up_values = re.findall(
         r"streamforge_worker_up\s+([0-9.]+)",
         text
     )
 
+    # --------------------------------------------------------
+    # Aggregate worker metrics
+    # --------------------------------------------------------
 
-    # --------------------------------------------------
-    # Convert values
-    # --------------------------------------------------
-
-    consumed_value = (
-        float(consumed.group(1))
-        if consumed
-        else 0
+    consumed_value = sum(
+        float(value)
+        for value in consumed_values
     )
 
-    processed_value = (
-        float(processed.group(1))
-        if processed
-        else 0
+    processed_value = sum(
+        float(value)
+        for value in processed_values
     )
 
-    failed_value = (
-        int(float(errors.group(1)))
-        if errors
-        else 0
+    failed_value = int(
+        sum(
+            float(value)
+            for value in error_values
+        )
     )
 
-    active_workers = (
-        int(float(worker_up.group(1)))
-        if worker_up
-        else 0
+    active_workers = int(
+        sum(
+            float(value)
+            for value in worker_up_values
+        )
     )
-
-
-    # --------------------------------------------------
-    # Calculate stable throughput
-    # --------------------------------------------------
+    print(
+        "DEBUG METRICS:",
+        len(worker_metrics),
+        "workers_found:",
+        worker_up_values,
+        "processed:",
+        processed_values,
+        flush=True
+    )
+    # --------------------------------------------------------
+    # Calculate throughput
+    # --------------------------------------------------------
 
     current_time_seconds = time.time()
 
     throughput_samples.append(
-        (current_time_seconds, processed_value)
+        (
+            current_time_seconds,
+            processed_value
+        )
     )
 
-    # Keep only the last 5 seconds of samples
-
+    # Keep only samples from the last 10 seconds
     cutoff_time = current_time_seconds - 10
 
     throughput_samples[:] = [
@@ -189,21 +231,44 @@ def metrics():
     if len(throughput_samples) >= 2:
 
         oldest_time, oldest_processed = throughput_samples[0]
+
         newest_time, newest_processed = throughput_samples[-1]
 
         elapsed = newest_time - oldest_time
-        processed_difference = newest_processed - oldest_processed
 
-        if elapsed > 0 and processed_difference >= 0:
+        processed_difference = (
+            newest_processed - oldest_processed
+        )
+
+        if elapsed > 0 and processed_difference > 0:
+
             current_throughput = round(
                 processed_difference / elapsed,
                 2
             )
+
+    if current_throughput == 0.0 and len(throughput_samples) >= 2:
+
+        previous_time, previous_processed = throughput_samples[-2]
+
+        elapsed = current_time_seconds - previous_time
+
+        processed_difference = (
+            processed_value - previous_processed
+        )
+
+        if elapsed > 0 and processed_difference > 0:
+
+            current_throughput = round(
+                processed_difference / elapsed,
+                2
+            )
+
     latest_throughput = current_throughput
 
-# --------------------------------------------------
+    # --------------------------------------------------------
     # History
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     current_time = datetime.now().strftime(
         "%H:%M:%S"
@@ -215,21 +280,22 @@ def metrics():
 
         "throughput": current_throughput,
 
-        "processed": int(processed_value),
+        "processed": int(
+            processed_value
+        ),
 
-        "consumed": int(consumed_value)
+        "consumed": int(
+            consumed_value
+        )
 
     })
 
-
     # Keep only last 20 points
-
     metrics_history[:] = metrics_history[-20:]
 
-
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Return dashboard metrics
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     return {
 
@@ -238,15 +304,12 @@ def metrics():
         "active_workers": active_workers,
 
         "failed_events": failed_value,
+
         "partitions": get_partition_count(),
+
         "total_lag": get_total_lag()
 
     }
-
-
-# --------------------------------------------------
-# Throughput History
-# --------------------------------------------------
 
 @app.get("/metrics/history")
 def metrics_history_endpoint():
@@ -254,9 +317,9 @@ def metrics_history_endpoint():
     return metrics_history
 
 
-# --------------------------------------------------
+# ============================================================
 # Worker Information
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/workers")
 def workers():
@@ -264,8 +327,11 @@ def workers():
     try:
 
         with open(
+
             "data/rocksdb/worker_status.json",
+
             "r"
+
         ) as f:
 
             status = json.load(f)
@@ -276,6 +342,7 @@ def workers():
 
 
     workers = []
+
 
     for worker_id, info in status.items():
 
@@ -293,9 +360,9 @@ def workers():
     return workers
 
 
-# --------------------------------------------------
+# ============================================================
 # Summary
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/summary")
 def summary():
@@ -303,8 +370,11 @@ def summary():
     try:
 
         with open(
+
             "data/state_snapshot.json",
+
             "r"
+
         ) as f:
 
             data = json.load(f)
@@ -326,16 +396,16 @@ def summary():
         }
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Truck count
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     total_trucks = len(data)
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Total readings
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     total_readings = sum(
 
@@ -346,9 +416,9 @@ def summary():
     )
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Average temperature
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     if total_trucks > 0:
 
@@ -371,11 +441,12 @@ def summary():
         avg_temp = 0
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Alerts
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     alerts_count = 0
+
 
     for truck in data.values():
 
@@ -384,17 +455,21 @@ def summary():
             alerts_count += 1
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Active workers
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     active_workers = 0
+
 
     try:
 
         with open(
+
             "data/rocksdb/worker_status.json",
+
             "r"
+
         ) as f:
 
             worker_data = json.load(f)
@@ -415,9 +490,9 @@ def summary():
         active_workers = 0
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Return summary
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     return {
 
@@ -434,9 +509,9 @@ def summary():
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # Alerts
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/alerts")
 def alerts():
@@ -457,7 +532,13 @@ def alerts():
 
     try:
 
-        with open(path, "r") as f:
+        with open(
+
+            path,
+
+            "r"
+
+        ) as f:
 
             data = json.load(f)
 
@@ -502,8 +583,11 @@ def alerts():
             "truck_id": truck_id,
 
             "temperature": round(
+
                 temp,
+
                 2
+
             ),
 
             "severity": severity
@@ -520,9 +604,9 @@ def alerts():
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # Recovery
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/recovery")
 def recovery():
@@ -533,8 +617,11 @@ def recovery():
     try:
 
         with open(
+
             "data/state_snapshot.json",
+
             "r"
+
         ) as f:
 
             data = json.load(f)
@@ -557,182 +644,381 @@ def recovery():
         "records": records
 
     }
-# --------------------------------------------------
+
+
+# ============================================================
 # Stream Topology
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/api/topology")
 def topology():
 
     return {
+
         "nodes": [
+
             {
+
                 "id": "producer",
+
                 "type": "default",
-                "position": {"x": 0, "y": 150},
-                "data": {"label": "Telemetry Producer"}
+
+                "position": {
+                    "x": 0,
+                    "y": 150
+                },
+
+                "data": {
+                    "label": "Telemetry Producer"
+                }
+
             },
+
             {
+
                 "id": "kafka",
+
                 "type": "default",
-                "position": {"x": 300, "y": 150},
-                "data": {"label": "Kafka"}
+
+                "position": {
+                    "x": 300,
+                    "y": 150
+                },
+
+                "data": {
+                    "label": "Kafka"
+                }
+
             },
+
             {
+
                 "id": "worker",
+
                 "type": "default",
-                "position": {"x": 600, "y": 150},
-                "data": {"label": "StreamForge Worker"}
+
+                "position": {
+                    "x": 600,
+                    "y": 150
+                },
+
+                "data": {
+                    "label": "StreamForge Worker"
+                }
+
             },
+
             {
+
                 "id": "rocksdb",
+
                 "type": "default",
-                "position": {"x": 900, "y": 150},
-                "data": {"label": "RocksDB"}
+
+                "position": {
+                    "x": 900,
+                    "y": 150
+                },
+
+                "data": {
+                    "label": "RocksDB"
+                }
+
             }
+
         ],
+
         "edges": [
+
             {
+
                 "id": "producer-kafka",
+
                 "source": "producer",
+
                 "target": "kafka",
+
                 "animated": True
+
             },
+
             {
+
                 "id": "kafka-worker",
+
                 "source": "kafka",
+
                 "target": "worker",
+
                 "animated": True
+
             },
+
             {
+
                 "id": "worker-rocksdb",
+
                 "source": "worker",
+
                 "target": "rocksdb",
+
                 "animated": True
+
             }
+
         ]
+
     }
 
-# --------------------------------------------------
+
+# ============================================================
 # WebSocket Metrics
-# --------------------------------------------------
+# ============================================================
 
 @app.websocket("/ws/metrics")
 async def websocket_metrics(websocket: WebSocket):
 
     await websocket.accept()
 
+
     try:
+
         while True:
 
             try:
-                throughput = float(latest_throughput)
+
+                throughput = float(
+                    latest_throughput
+                )
+
 
                 await websocket.send_json({
-                    "throughput": round(throughput, 2),
-                    "total_events_sec": round(throughput, 2)
+
+                    "throughput": round(
+                        throughput,
+                        2
+                    ),
+
+                    "total_events_sec": round(
+                        throughput,
+                        2
+                    )
+
                 })
+
 
             except Exception as e:
 
-                print("WebSocket metrics error:", e)
+                print(
+                    "WebSocket metrics error:",
+                    e
+                )
+
 
                 await websocket.send_json({
+
                     "throughput": 0,
+
                     "total_events_sec": 0
+
                 })
+
 
             await asyncio.sleep(2)
 
+
     except Exception:
+
         pass
 
-# --------------------------------------------------
+
+# ============================================================
 # Kafka Configuration
-# --------------------------------------------------
+# ============================================================
 
 KAFKA_BOOTSTRAP = "localhost:9092"
+
 KAFKA_TOPIC = "truck_telemetry"
 
+
 kafka_admin = AdminClient({
-    "bootstrap.servers": KAFKA_BOOTSTRAP
+
+    "bootstrap.servers":
+        KAFKA_BOOTSTRAP
+
 })
 
 
+# ============================================================
+# Kafka Partition Count
+# ============================================================
+
 def get_partition_count():
+
     try:
+
         metadata = kafka_admin.list_topics(
+
             topic=KAFKA_TOPIC,
+
             timeout=5
+
         )
 
-        topic = metadata.topics.get(KAFKA_TOPIC)
+
+        topic = metadata.topics.get(
+            KAFKA_TOPIC
+        )
+
 
         if topic is None:
+
             return 0
 
-        return len(topic.partitions)
+
+        return len(
+            topic.partitions
+        )
+
 
     except Exception as e:
-        print("Kafka partition error:", e)
+
+        print(
+            "Kafka partition error:",
+            e
+        )
+
         return 0
 
 
+# ============================================================
+# Kafka Total Lag
+# ============================================================
+
 def get_total_lag():
+
     try:
-        from confluent_kafka import TopicPartition
-        from confluent_kafka.admin import OffsetSpec, _ConsumerGroupTopicPartitions
 
-        partitions = [
-            TopicPartition(KAFKA_TOPIC, p)
-            for p in range(get_partition_count())
-        ]
-
-        request = _ConsumerGroupTopicPartitions(
-            "streamforge-state-workers",
-            partitions
+        from confluent_kafka import (
+            TopicPartition
         )
 
-        response = kafka_admin.list_consumer_group_offsets([request])
-        committed = response["streamforge-state-workers"].result()
+        from confluent_kafka.admin import (
+            OffsetSpec,
+            _ConsumerGroupTopicPartitions
+        )
+
+
+        partitions = [
+
+            TopicPartition(
+                KAFKA_TOPIC,
+                p
+            )
+
+            for p in range(
+                get_partition_count()
+            )
+
+        ]
+
+
+        request = _ConsumerGroupTopicPartitions(
+
+            "streamforge-state-workers",
+
+            partitions
+
+        )
+
+
+        response = (
+            kafka_admin
+            .list_consumer_group_offsets(
+                [request]
+            )
+        )
+
+
+        committed = (
+            response[
+                "streamforge-state-workers"
+            ].result()
+        )
+
 
         offset_requests = {}
 
+
         for tp in committed.topic_partitions:
-            if tp.offset is not None and tp.offset >= 0:
-                offset_requests[tp] = OffsetSpec.latest()
+
+            if (
+
+                tp.offset is not None
+
+                and tp.offset >= 0
+
+            ):
+
+                offset_requests[tp] = (
+                    OffsetSpec.latest()
+                )
+
 
         if not offset_requests:
+
             return 0
 
-        latest_response = kafka_admin.list_offsets(offset_requests)
+
+        latest_response = (
+            kafka_admin.list_offsets(
+                offset_requests
+            )
+        )
+
 
         total_lag = 0
 
+
         for tp in committed.topic_partitions:
+
             committed_offset = tp.offset
 
-            if committed_offset is None or committed_offset < 0:
+
+            if (
+
+                committed_offset is None
+
+                or committed_offset < 0
+
+            ):
+
                 continue
 
-            latest = latest_response[tp].result().offset
-            total_lag += max(0, latest - committed_offset)
+
+            latest = (
+                latest_response[tp]
+                .result()
+                .offset
+            )
+
+
+            total_lag += max(
+
+                0,
+
+                latest - committed_offset
+
+            )
+
 
         return total_lag
 
+
     except Exception as e:
-        print("Kafka lag error:", e)
+
+        print(
+            "Kafka lag error:",
+            e
+        )
+
         return 0
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import msvcrt
 from datetime import datetime
 
 from confluent_kafka import (

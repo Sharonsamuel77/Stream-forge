@@ -6,8 +6,8 @@ import ReactFlow, {
 
 import "reactflow/dist/style.css";
 
-const API_URL = "http://127.0.0.1:8002";
-const WS_URL = "ws://127.0.0.1:8002/ws/metrics";
+const API_URL = "http://127.0.0.1:8001";
+const WS_URL = "ws://127.0.0.1:8001/ws/metrics";
 
 // Keep these OUTSIDE the component.
 // This prevents the React Flow nodeTypes/edgeTypes warning.
