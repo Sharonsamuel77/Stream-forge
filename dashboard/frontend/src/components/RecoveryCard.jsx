@@ -9,23 +9,33 @@ export default function RecoveryCard() {
   });
 
   useEffect(() => {
+    let mounted = true;
+
     const loadData = async () => {
       try {
-        const res = await API.get("/state");
+        const res = await API.get("/recovery");
 
-        setRecovery({
-          status: res.data.error ? "ERROR" : "RECOVERED",
-          state_store: "RocksDB",
-          records: Number(res.data.total_readings || 0),
-        });
+        const records = Number(
+          res.data?.records || 0
+        );
+
+        if (mounted) {
+          setRecovery({
+            status: records > 0 ? "Recovered" : "UNAVAILABLE",
+            state_store: "RocksDB",
+            records,
+          });
+        }
       } catch (err) {
         console.error("Recovery:", err);
 
-        setRecovery({
-          status: "UNAVAILABLE",
-          state_store: "RocksDB",
-          records: 0,
-        });
+        if (mounted) {
+          setRecovery({
+            status: "UNAVAILABLE",
+            state_store: "RocksDB",
+            records: 0,
+          });
+        }
       }
     };
 
@@ -33,7 +43,10 @@ export default function RecoveryCard() {
 
     const timer = setInterval(loadData, 5000);
 
-    return () => clearInterval(timer);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, []);
 
   return (

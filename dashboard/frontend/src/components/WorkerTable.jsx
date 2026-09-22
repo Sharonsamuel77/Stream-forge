@@ -12,8 +12,11 @@ export default function WorkerTable() {
 
         console.log("Workers:", response.data);
 
-        // Backend returns: { workers: [...] }
-        setWorkers(response.data.workers || []);
+        // Backend returns an array directly
+        setWorkers(Array.isArray(response.data)
+          ? response.data
+          : response.data.workers || []
+        );
       } catch (err) {
         console.error("Failed to load workers:", err);
         setWorkers([]);
@@ -42,27 +45,30 @@ export default function WorkerTable() {
           <thead>
             <tr>
               <th>Worker</th>
-              <th>PID</th>
               <th>Status</th>
+              <th>Last Seen</th>
             </tr>
           </thead>
 
           <tbody>
             {workers.map((worker) => (
               <tr key={worker.id}>
-                <td>Worker #{worker.id}</td>
-                <td>{worker.pid}</td>
+                <td>{worker.id}</td>
 
                 <td
                   style={{
                     color:
-                      worker.status === "HEALTHY"
-                        ? "#00d4ff"
+                      String(worker.status).toLowerCase() === "active"
+                        ? "#00ff88"
                         : "#ff6b6b",
                     fontWeight: "bold",
                   }}
                 >
-                  {worker.status}
+                  {String(worker.status).toUpperCase()}
+                </td>
+
+                <td>
+                  {worker.last_seen || "N/A"}
                 </td>
               </tr>
             ))}

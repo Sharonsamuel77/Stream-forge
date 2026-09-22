@@ -1,104 +1,112 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { API } from "../api";
 
 function MetricCards() {
   const [summary, setSummary] = useState({});
-  const [metrics, setMetrics] = useState({});
+  const [metrics, setMetrics] = useState({
+    throughput: 0,
+    total_lag: 0,
+    partitions: 0,
+  });
 
   useEffect(() => {
-    const loadSummary = async () => {
+    let mounted = true;
+
+    const loadData = async () => {
       try {
-        const response = await API.get("/summary");
-        setSummary(response.data);
+        const [summaryResponse, metricsResponse] =
+          await Promise.all([
+            API.get("/summary"),
+            API.get("/metrics"),
+          ]);
+
+        if (!mounted) return;
+
+        setSummary(summaryResponse.data || {});
+
+        const data = metricsResponse.data || {};
+
+        setMetrics({
+          throughput: Number(data.throughput ?? 0),
+          total_lag: Number(data.total_lag ?? 0),
+          partitions: Number(
+            data.partitions ?? data.partition_count ?? 0
+          ),
+        });
       } catch (error) {
-        console.error("Failed to load summary:", error);
+        console.error("Failed to load dashboard metrics:", error);
       }
     };
 
-    const loadMetrics = async () => {
-      try {
-        const response = await API.get("/metrics");
-        setMetrics(response.data);
-      } catch (error) {
-        console.error("Failed to load metrics:", error);
-      }
+    loadData();
+
+    const timer = setInterval(loadData, 2000);
+
+    return () => {
+      mounted = false;
+      clearInterval(timer);
     };
-
-    loadSummary();
-    loadMetrics();
-
-    const timer = setInterval(() => {
-      loadSummary();
-      loadMetrics();
-    }, 3000);
-
-    return () => clearInterval(timer);
   }, []);
+
+  const healthy = metrics.total_lag === 0;
 
   return (
     <div className="metrics-grid">
 
       <div className="metric-card">
         <h3>Total Trucks</h3>
-        <h2>{summary.total_trucks || 0}</h2>
+        <h2>{summary.total_trucks ?? 0}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Active Workers</h3>
-        <h2>{summary.active_workers || 0}</h2>
+        <h2>{summary.active_workers ?? 0}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Total Readings</h3>
-        <h2>{summary.total_readings || 0}</h2>
+        <h2>{summary.total_readings ?? 0}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Avg Temperature</h3>
         <h2>
-          {summary.avg_temperature || 0}°C
+          {Number(summary.avg_temperature ?? 0).toFixed(2)}°C
         </h2>
       </div>
 
       <div className="metric-card">
         <h3>Throughput</h3>
         <h2>
-          {metrics.throughput || 0} events/sec
+          {Number(metrics.throughput).toLocaleString(undefined, {
+            maximumFractionDigits: 2,
+          })} events/sec
         </h2>
       </div>
 
       <div className="metric-card">
         <h3>Total Lag</h3>
-        <h2>
-          {metrics.total_lag || 0}
-        </h2>
+        <h2>{metrics.total_lag.toLocaleString()}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Partitions</h3>
-        <h2>
-          {metrics.partitions || 0}
-        </h2>
+        <h2>{metrics.partitions}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Active Alerts</h3>
-        <h2>{summary.active_alerts || 0}</h2>
+        <h2>{summary.active_alerts ?? 0}</h2>
       </div>
 
       <div className="metric-card">
         <h3>Status</h3>
         <h2
           style={{
-            color:
-              metrics.total_lag === 0
-                ? "#00ff88"
-                : "#ffcc00",
+            color: healthy ? "#00ff88" : "#ffcc00",
           }}
         >
-          {metrics.total_lag === 0
-            ? "HEALTHY"
-            : "CATCHING UP"}
+          {healthy ? "HEALTHY" : "CATCHING UP"}
         </h2>
       </div>
 
@@ -107,3 +115,4 @@ function MetricCards() {
 }
 
 export default MetricCards;
+

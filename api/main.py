@@ -33,6 +33,9 @@ _previous_offset_time = None
 _ws_previous_total_offset = None
 _ws_previous_offset_time = None
 
+# Dashboard throughput history
+_metrics_history = []
+
 
 # ============================================================
 # FastAPI
@@ -54,27 +57,9 @@ app.add_middleware(
 
 # ============================================================
 # Get ALL telemetry worker processes
-#
-# Important:
-#
-# Each logical StreamForge worker may appear as:
-#
-# PowerShell
-#    └── venv Python worker
-#           └── Python311 Kafka consumer
-#
-# Kafka client ID may contain the CHILD PID.
-# We therefore keep the complete process tree.
 # ============================================================
 
 def get_all_worker_processes():
-    """
-    Return all processes whose command line contains
-    worker.telemetry_worker.
-
-    Unlike get_worker_status(), this function intentionally
-    keeps both parent and child processes.
-    """
 
     processes = []
 
@@ -103,10 +88,12 @@ def get_all_worker_processes():
         )
 
         if result.returncode != 0:
+
             print(
-                f"Worker process detection failed: "
+                "Worker process detection failed: "
                 f"{result.stderr}"
             )
+
             return []
 
         output = result.stdout.strip()
@@ -122,7 +109,11 @@ def get_all_worker_processes():
         for process in data:
 
             pid = process.get("ProcessId")
-            parent_pid = process.get("ParentProcessId")
+
+            parent_pid = process.get(
+                "ParentProcessId"
+            )
+
             command_line = (
                 process.get("CommandLine")
                 or ""
@@ -174,39 +165,23 @@ def get_all_worker_processes():
 
 
 # ============================================================
-# Resolve a process to the logical StreamForge worker
+# Resolve Kafka consumer PID to logical worker PID
 # ============================================================
 
 def resolve_worker_root_pid(
     pid,
     process_map,
 ):
-    """
-    Resolve a Kafka consumer PID to the top-level
-    StreamForge worker PID.
-
-    Example:
-
-        Kafka client PID = 19136
-
-        19136
-           ↓ parent
-         840
-           ↓ parent
-        19688
-
-    The logical StreamForge worker is 840 because
-    it is the venv Python process running:
-
-        python.exe -m worker.telemetry_worker
-    """
 
     try:
+
         current_pid = int(pid)
+
     except (
         ValueError,
         TypeError,
     ):
+
         return None
 
     visited = set()
@@ -227,18 +202,13 @@ def resolve_worker_root_pid(
             or ""
         )
 
-        # The actual StreamForge worker is the process
-        # running from the project's venv.
-        #
-        # Example:
-        #
-        # E:\stream-forge\venv\Scripts\python.exe
-        #
+        command_lower = command.lower()
+
         if (
             "worker.telemetry_worker"
-            in command
-            and "\\venv\\Scripts\\python.exe"
-            in command.lower()
+            in command_lower
+            and "\\venv\\scripts\\python.exe"
+            in command_lower
         ):
 
             return current_pid
@@ -251,13 +221,16 @@ def resolve_worker_root_pid(
             return None
 
         try:
+
             current_pid = int(
                 parent_pid
             )
+
         except (
             ValueError,
             TypeError,
         ):
+
             return None
 
     return None
@@ -267,29 +240,7 @@ def resolve_worker_root_pid(
 # Worker status
 # ============================================================
 
-# ============================================================
-# Worker status
-# ============================================================
-
 def get_worker_status():
-    """
-    Detect the actual telemetry worker Python processes.
-
-    StreamForge currently launches workers in a two-level process
-    structure:
-
-        venv Python
-            |
-            +-- Python 3.11 worker.telemetry_worker
-
-    The child Python process is the actual Kafka consumer and its
-    PID appears in the Kafka client ID:
-
-        worker-9880
-
-    Therefore we keep the LEAF telemetry_worker processes rather
-    than removing all children.
-    """
 
     workers = []
 
@@ -300,8 +251,11 @@ def get_worker_status():
             "-NoProfile",
             "-Command",
             (
-                "Get-CimInstance Win32_Process "
-                "-Filter \"Name='python.exe'\" | "
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { "
+                "$_.CommandLine -and "
+                "$_.CommandLine -match 'worker\\.telemetry_worker' "
+                "} | "
                 "Select-Object ProcessId,ParentProcessId,CommandLine | "
                 "ConvertTo-Json -Compress"
             ),
@@ -317,7 +271,8 @@ def get_worker_status():
         if result.returncode != 0:
 
             print(
-                f"Worker detection failed: {result.stderr}"
+                "Worker detection failed: "
+                f"{result.stderr}"
             )
 
             return []
@@ -332,30 +287,14 @@ def get_worker_status():
         if isinstance(data, dict):
             data = [data]
 
-        # ----------------------------------------------------
-        # Collect every telemetry_worker process
-        # ----------------------------------------------------
-
-        candidates = []
-
         for process in data:
 
             pid = process.get("ProcessId")
-
-            parent_pid = process.get(
-                "ParentProcessId"
-            )
 
             command_line = (
                 process.get("CommandLine")
                 or ""
             )
-
-            if (
-                "worker.telemetry_worker"
-                not in command_line
-            ):
-                continue
 
             if pid is None:
                 continue
@@ -364,12 +303,6 @@ def get_worker_status():
 
                 pid = int(pid)
 
-                parent_pid = (
-                    int(parent_pid)
-                    if parent_pid is not None
-                    else None
-                )
-
             except (
                 ValueError,
                 TypeError,
@@ -377,73 +310,10 @@ def get_worker_status():
 
                 continue
 
-            candidates.append(
-                {
-                    "pid": pid,
-                    "parent_pid": parent_pid,
-                    "command": command_line,
-                }
-            )
-
-        if not candidates:
-            return []
-
-        # ----------------------------------------------------
-        # Build PID set
-        # ----------------------------------------------------
-
-        candidate_pids = {
-            worker["pid"]
-            for worker in candidates
-        }
-
-        # ----------------------------------------------------
-        # Detect leaf workers
-        #
-        # A process is a leaf worker if no other
-        # telemetry_worker process has it as parent.
-        #
-        # Example:
-        #
-        # 840
-        #   └── 19136
-        #
-        # 840 is parent.
-        # 19136 is leaf.
-        #
-        # We want 19136.
-        # ----------------------------------------------------
-
-        parent_pids = {
-            worker["parent_pid"]
-            for worker in candidates
-            if worker["parent_pid"] is not None
-        }
-
-        leaf_workers = [
-            worker
-            for worker in candidates
-            if worker["pid"] not in parent_pids
-        ]
-
-        # ----------------------------------------------------
-        # If no leaf workers are detected, fall back to all
-        # candidates instead of returning an empty list.
-        # ----------------------------------------------------
-
-        if not leaf_workers:
-            leaf_workers = candidates
-
-        # ----------------------------------------------------
-        # Return actual Kafka worker processes
-        # ----------------------------------------------------
-
-        for worker in leaf_workers:
-
             workers.append(
                 {
-                    "pid": worker["pid"],
-                    "command": worker["command"],
+                    "pid": pid,
+                    "command": command_line,
                 }
             )
 
@@ -465,17 +335,13 @@ def get_worker_status():
             f"Worker detection error: {error}"
         )
 
-    # --------------------------------------------------------
-    # Remove duplicate PIDs
-    # --------------------------------------------------------
-
     unique_workers = {}
 
     for worker in workers:
 
-        pid = worker["pid"]
-
-        unique_workers[pid] = worker
+        unique_workers[
+            worker["pid"]
+        ] = worker
 
     workers = list(
         unique_workers.values()
@@ -517,6 +383,11 @@ def get_kafka_partitions():
         )
 
         if result.returncode != 0:
+
+            print(
+                f"Kafka query failed: {result.stderr}"
+            )
+
             return []
 
         partitions = []
@@ -528,14 +399,10 @@ def get_kafka_partitions():
             if not line:
                 continue
 
-            if line.startswith(
-                "GROUP"
-            ):
+            if line.startswith("GROUP"):
                 continue
 
-            if line.startswith(
-                "Warning"
-            ):
+            if line.startswith("Warning"):
                 continue
 
             parts = line.split()
@@ -562,6 +429,7 @@ def get_kafka_partitions():
                 )
 
                 consumer_id = parts[6]
+
                 host = parts[7]
 
                 client_id = (
@@ -694,14 +562,6 @@ def get_rocksdb_info():
 def get_worker_pid_from_client_id(
     client_id
 ):
-    """
-    Kafka client IDs look like:
-
-        worker-9880
-
-    The PID may belong to the child Kafka consumer.
-    We resolve it to the parent logical worker later.
-    """
 
     if not client_id:
         return None
@@ -745,24 +605,9 @@ def build_worker_mapping(
     partitions,
     workers,
 ):
-    """
-    Build:
-
-        Kafka partition
-             ↓
-        Kafka client PID
-             ↓
-        logical StreamForge worker PID
-
-    This handles the two-process worker architecture.
-    """
 
     if not partitions or not workers:
         return {}
-
-    # --------------------------------------------------------
-    # Get the complete process tree again.
-    # --------------------------------------------------------
 
     all_processes = (
         get_all_worker_processes()
@@ -772,10 +617,6 @@ def build_worker_mapping(
         process["pid"]: process
         for process in all_processes
     }
-
-    # --------------------------------------------------------
-    # Known logical worker PIDs
-    # --------------------------------------------------------
 
     worker_pids = set()
 
@@ -796,10 +637,6 @@ def build_worker_mapping(
             continue
 
     mapping = {}
-
-    # --------------------------------------------------------
-    # Match each Kafka assignment
-    # --------------------------------------------------------
 
     for partition in partitions:
 
@@ -826,25 +663,11 @@ def build_worker_mapping(
         if child_pid is None:
             continue
 
-        # ----------------------------------------------------
-        # Case 1:
-        # Kafka PID itself is a logical worker.
-        # ----------------------------------------------------
-
         if child_pid in worker_pids:
 
             logical_pid = child_pid
 
         else:
-
-            # ------------------------------------------------
-            # Case 2:
-            # Kafka PID belongs to the child process.
-            #
-            # Resolve:
-            #
-            # child PID → parent → worker PID
-            # ------------------------------------------------
 
             logical_pid = (
                 resolve_worker_root_pid(
@@ -859,19 +682,20 @@ def build_worker_mapping(
         if logical_pid not in worker_pids:
             continue
 
+        matching_worker = next(
+            (
+                worker
+                for worker in workers
+                if int(worker["pid"])
+                == logical_pid
+            ),
+            None,
+        )
+
         mapping[consumer_id] = {
             "pid": logical_pid,
             "client_pid": child_pid,
-            "worker": next(
-                (
-                    worker
-                    for worker in workers
-                    if int(
-                        worker["pid"]
-                    ) == logical_pid
-                ),
-                None,
-            ),
+            "worker": matching_worker,
         }
 
     return mapping
@@ -899,7 +723,7 @@ def get_partition_worker(
 
 
 # ============================================================
-# Topology
+# Topology API
 # ============================================================
 
 @app.get("/api/topology")
@@ -1067,12 +891,20 @@ async def topology():
         if pid not in assigned_pids:
             assigned_pids.append(pid)
 
-    # Add workers with no current Kafka assignment.
     for worker in workers:
 
-        pid = int(
-            worker["pid"]
-        )
+        try:
+
+            pid = int(
+                worker["pid"]
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            continue
 
         if pid not in assigned_pids:
             assigned_pids.append(pid)
@@ -1240,6 +1072,7 @@ async def topology():
         "partitions": partitions,
         "rocksdb": rocksdb,
         "workers": workers,
+
         "worker_mapping": {
             consumer_id: {
                 "pid": info["pid"],
@@ -1304,6 +1137,7 @@ async def dashboard_metrics():
 
     global _previous_total_offset
     global _previous_offset_time
+    global _metrics_history
 
     partitions = (
         get_kafka_partitions()
@@ -1358,17 +1192,39 @@ async def dashboard_metrics():
         for partition in partitions
     )
 
+    throughput_value = round(
+        throughput,
+        2,
+    )
+
+    # --------------------------------------------------------
+    # Save throughput history
+    # --------------------------------------------------------
+
+    _metrics_history.append(
+        {
+            "time": time.strftime(
+                "%H:%M:%S"
+            ),
+
+            "throughput": throughput_value,
+        }
+    )
+
+    # Keep only latest 50 points
+    if len(_metrics_history) > 50:
+
+        _metrics_history = (
+            _metrics_history[-50:]
+        )
+
     return {
 
-        "throughput": round(
-            throughput,
-            2,
-        ),
+        "throughput":
+            throughput_value,
 
-        "total_events_sec": round(
-            throughput,
-            2,
-        ),
+        "total_events_sec":
+            throughput_value,
 
         "total_lag":
             total_lag,
@@ -1381,6 +1237,92 @@ async def dashboard_metrics():
 
         "timestamp":
             current_time,
+    }
+
+
+# ============================================================
+# Metrics History API
+# ============================================================
+
+@app.get("/metrics/history")
+async def metrics_history():
+
+    return _metrics_history[-50:]
+
+
+# ============================================================
+# Alerts API
+# ============================================================
+
+@app.get("/alerts")
+async def alerts():
+
+    partitions = (
+        get_kafka_partitions()
+    )
+
+    result = []
+
+    for partition in partitions:
+
+        lag = int(
+            partition.get(
+                "lag",
+                0,
+            )
+        )
+
+        if lag <= 0:
+            continue
+
+        partition_number = (
+            partition.get(
+                "partition",
+                0,
+            )
+        )
+
+        if lag >= 100:
+
+            severity = "CRITICAL"
+
+        elif lag >= 50:
+
+            severity = "HIGH"
+
+        else:
+
+            severity = "MEDIUM"
+
+        result.append(
+            {
+                "truck_id":
+                    f"Partition {partition_number}",
+
+                "temperature":
+                    0,
+
+                "severity":
+                    severity,
+
+                "lag":
+                    lag,
+
+                "partition":
+                    partition_number,
+
+                "message":
+                    (
+                        f"Kafka partition "
+                        f"{partition_number} "
+                        f"has lag of {lag}"
+                    ),
+            }
+        )
+
+    return {
+        "alerts": result,
+        "total_alerts": len(result),
     }
 
 
@@ -2015,3 +1957,41 @@ async def state():
 
             "avg_temperature": 0,
         }
+
+
+# ============================================================
+# Recovery
+# ============================================================
+
+@app.get("/recovery")
+def recovery():
+
+    records = 0
+
+    try:
+
+        with open(
+            STATE_SNAPSHOT,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            data = json.load(f)
+
+        records = len(data)
+
+    except Exception:
+
+        records = 0
+
+    return {
+
+        "status":
+            "Recovered",
+
+        "state_store":
+            "RocksDB",
+
+        "records":
+            records,
+    }

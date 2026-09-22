@@ -9,6 +9,11 @@ import "reactflow/dist/style.css";
 const API_URL = "http://127.0.0.1:8001";
 const WS_URL = "ws://127.0.0.1:8001/ws/metrics";
 
+// Keep these OUTSIDE the component.
+// This prevents the React Flow nodeTypes/edgeTypes warning.
+const nodeTypes = {};
+const edgeTypes = {};
+
 function StreamGraph() {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -16,10 +21,12 @@ function StreamGraph() {
   const [connected, setConnected] = useState(false);
 
   // ==========================================================
-  // Load topology
+  // LOAD TOPOLOGY
   // ==========================================================
 
   useEffect(() => {
+    let cancelled = false;
+
     const loadTopology = async () => {
       try {
         const response = await fetch(
@@ -34,8 +41,19 @@ function StreamGraph() {
 
         const data = await response.json();
 
-        setNodes(data.nodes || []);
-        setEdges(data.edges || []);
+        if (!cancelled) {
+          setNodes(
+            Array.isArray(data.nodes)
+              ? data.nodes
+              : []
+          );
+
+          setEdges(
+            Array.isArray(data.edges)
+              ? data.edges
+              : []
+          );
+        }
       } catch (error) {
         console.error(
           "Failed to load topology:",
@@ -51,18 +69,26 @@ function StreamGraph() {
       5000
     );
 
-    return () => clearInterval(timer);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   // ==========================================================
-  // WebSocket metrics
+  // WEBSOCKET METRICS
   // ==========================================================
 
   useEffect(() => {
-    let websocket;
-    let reconnectTimer;
+    let websocket = null;
+    let reconnectTimer = null;
+    let stopped = false;
 
     const connect = () => {
+      if (stopped) {
+        return;
+      }
+
       console.log(
         "Connecting to StreamForge metrics..."
       );
@@ -70,6 +96,11 @@ function StreamGraph() {
       websocket = new WebSocket(WS_URL);
 
       websocket.onopen = () => {
+        if (stopped) {
+          websocket.close();
+          return;
+        }
+
         console.log(
           "Connected to StreamForge metrics"
         );
@@ -83,11 +114,18 @@ function StreamGraph() {
             event.data
           );
 
-          setTotalThroughput(
-            Number(
-              metrics.total_events_sec || 0
-            )
+          const throughput = Number(
+            metrics.total_events_sec ??
+              metrics.throughput ??
+              metrics.total_throughput ??
+              0
           );
+
+          if (Number.isFinite(throughput)) {
+            setTotalThroughput(throughput);
+          } else {
+            setTotalThroughput(0);
+          }
         } catch (error) {
           console.error(
             "Invalid WebSocket data:",
@@ -112,30 +150,47 @@ function StreamGraph() {
 
         setConnected(false);
 
-        reconnectTimer = setTimeout(
-          connect,
-          3000
-        );
+        if (!stopped) {
+          reconnectTimer = setTimeout(
+            connect,
+            3000
+          );
+        }
       };
     };
 
     connect();
 
     return () => {
-      clearTimeout(reconnectTimer);
+      stopped = true;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
 
       if (websocket) {
-        websocket.close();
+        websocket.onclose = null;
+        websocket.onerror = null;
+
+        if (
+          websocket.readyState ===
+            WebSocket.OPEN ||
+          websocket.readyState ===
+            WebSocket.CONNECTING
+        ) {
+          websocket.close();
+        }
       }
     };
   }, []);
 
   // ==========================================================
-  // Render
+  // RENDER
   // ==========================================================
 
   return (
     <div className="stream-graph">
+
       <div
         style={{
           display: "flex",
@@ -160,7 +215,7 @@ function StreamGraph() {
             }}
           >
             Throughput:{" "}
-            {totalThroughput.toLocaleString()} msg/s
+            {totalThroughput.toFixed(2)} msg/s
           </span>
         </div>
       </div>
@@ -169,17 +224,25 @@ function StreamGraph() {
         style={{
           width: "100%",
           height: "500px",
+          borderRadius: "10px",
+          overflow: "hidden",
         }}
       >
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
+          fitViewOptions={{
+            padding: 0.2,
+          }}
         >
           <Background />
           <Controls />
         </ReactFlow>
       </div>
+
     </div>
   );
 }

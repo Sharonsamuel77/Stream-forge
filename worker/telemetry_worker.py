@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import msvcrt
 from datetime import datetime
 
 from confluent_kafka import (
@@ -45,7 +46,7 @@ WORKER_ID = os.environ.get(
 METRICS_PORT = int(
     os.environ.get(
         "STREAMFORGE_METRICS_PORT",
-        "8000"
+        "9000"
     )
 )
 

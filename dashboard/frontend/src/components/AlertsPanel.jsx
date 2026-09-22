@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { API } from "../api";
 
 export default function AlertsPanel() {
@@ -7,22 +7,15 @@ export default function AlertsPanel() {
   useEffect(() => {
     const loadAlerts = async () => {
       try {
-        const res = await API.get("/summary");
+        const res = await API.get("/alerts");
 
-        const summary = res.data;
+        const data = res.data || {};
 
-        if (summary.active_alerts > 0) {
-          setAlerts([
-            {
-              truck_id: "Kafka",
-              temperature: "-",
-              severity: "HIGH",
-              message: `${summary.active_alerts} partition(s) have consumer lag`,
-            },
-          ]);
-        } else {
-          setAlerts([]);
-        }
+        setAlerts(
+          Array.isArray(data.alerts)
+            ? data.alerts
+            : []
+        );
       } catch (err) {
         console.error("Alerts:", err);
       }
@@ -45,21 +38,27 @@ export default function AlertsPanel() {
         <table>
           <thead>
             <tr>
-              <th>Source</th>
-              <th>Condition</th>
+              <th>Truck</th>
+              <th>Temperature</th>
               <th>Severity</th>
             </tr>
           </thead>
 
           <tbody>
             {alerts.map((alert, index) => (
-              <tr key={index}>
+              <tr key={`${alert.truck_id}-${index}`}>
                 <td>{alert.truck_id}</td>
-                <td>{alert.message}</td>
+
+                <td>
+                  {Number(alert.temperature).toFixed(2)} °C
+                </td>
+
                 <td
                   style={{
                     color:
-                      alert.severity === "CRITICAL"
+                      alert.severity === "HIGH"
+                        ? "red"
+                        : alert.severity === "CRITICAL"
                         ? "red"
                         : "orange",
                     fontWeight: "bold",
